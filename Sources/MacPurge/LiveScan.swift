@@ -24,6 +24,7 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
   private(set) var storagePreview: ScanReport?
   private(set) var pendingCategories = Set<ScanGroup>()
   private(set) var history: [ScanReport] = []
+  private(set) var regrownFolders: [RegrownFolder]?
   private(set) var historyEnabled: Bool
   private(set) var detailed = true
   private(set) var historyError: String?
@@ -35,6 +36,17 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
   private(set) var selectionNote: String?
   @ObservationIgnored private var work: Task<Void, Never>?
   private var generation = UUID()
+  private(set) var moveStates: [String: MoveAvailability] = [:]
+
+  func refreshMoveStates() async {
+    guard phase == .finished, let report else { return }
+    moveStates = [:]
+    guard
+      let states = try? await CacheTrash.shared.availability(for: report.items, projects: projects),
+      !Task.isCancelled, phase == .finished, self.report?.id == report.id
+    else { return }
+    moveStates = states
+  }
 
   init(defaults: UserDefaults = .standard, recordsHistory: Bool = true) {
     self.defaults = defaults
@@ -68,11 +80,17 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
     start()
   }
   func finishCurrentScan() async { await work?.value }
+  func forgetRegrowth(at path: String) async throws {
+    regrownFolders?.removeAll { $0.move.receipt.original.path == path }
+    if historyEnabled { try await HistoryIO.shared.forgetMove(at: path) }
+  }
+
   func setHistory(_ enabled: Bool) async {
     historyEnabled = enabled
     defaults.set(enabled, forKey: "keepsScanArchive")
     if !enabled {
       history = []
+      regrownFolders = nil
       do {
         try await HistoryIO.shared.clear()
         historyError = nil
@@ -97,6 +115,11 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
     let home = FileManager.default.homeDirectoryForCurrentUser
     let catalog = ScanRoot.catalog(home: home, projects: projects)
     let extended = detailed
+    let selectedProjects = projects
+    let includeProtected = defaults.bool(forKey: "scanProtectedLocations")
+    let scope = ScanReport.scopeKey(
+      extended: extended, protected: includeProtected, projects: selectedProjects)
+    moveStates = [:]
     storagePreview = nil
     pendingCategories = Set(ScanGroup.allCases)
     roots = catalog
@@ -139,13 +162,21 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
                 source: .status(note))
             ]
           } ?? []
-        let quick = catalog + inventory.roots + deviceStatus
+        let outputs = try await ProjectAttribution.outputRoots(
+          home: home, selected: selectedProjects)
+        var quick = catalog + inventory.roots + deviceStatus + outputs
+        if let index = quick.firstIndex(where: { $0.profile == .xcodeWorkspace }) {
+          let prefix = quick[index].url.path + "/"
+          quick[index].excludedDirectories = Set(
+            outputs.map { String($0.url.path.dropFirst(prefix.count)) })
+        }
         var statInfo = stat()
         let dev = stat(home.path, &statInfo) == 0 ? statInfo.st_dev : nil
         @MainActor func withTotals(
           _ value: ScanReport, pending: Set<ScanGroup>, sizes: [ScanGroup: GroupSize]
         ) -> ScanReport {
           var snapshot = value
+          snapshot.scope = scope
           snapshot.groupSafety = Dictionary(
             uniqueKeysWithValues: sizes.compactMap { group, size in
               size.breakdown.map { (group.rawValue, $0) }
@@ -153,7 +184,7 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
           snapshot.measuredGroupBytes = Dictionary(
             uniqueKeysWithValues: groupBytes.map { ($0.key.rawValue, $0.value) })
           snapshot.groups = Dictionary(
-            uniqueKeysWithValues: groupBytes.compactMap { group, bytes in
+            uniqueKeysWithValues: Set(roots.map(\.group)).compactMap { group in
               let members = roots.filter { $0.group == group }
               guard
                 !pending.contains(group), !(group == .simulators && inventory.note != nil),
@@ -161,7 +192,7 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
                   results[$0.id]?.state == .complete || results[$0.id]?.state == .absent
                 })
               else { return nil }
-              return (group.rawValue, bytes)
+              return (group.rawValue, groupBytes[group] ?? 0)
             })
           return snapshot
         }
@@ -200,8 +231,12 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
         if extended {
           publish(quick, pending: Set(ScanGroup.allCases).subtracting([.projects]), sizes: totals)
           let extra = try await ExtendedInventory.discover(
-            home: home, includeProtected: defaults.bool(forKey: "scanProtectedLocations"),
-            selectedProjects: projects)
+            home: home, includeProtected: includeProtected, simulatorInventory: inventory,
+            selectedProjects: selectedProjects,
+            projectMeasurements: Dictionary(
+              uniqueKeysWithValues: catalog.filter { $0.group == .projects }.compactMap { root in
+                results[root.id].map { (root.url.path, $0) }
+              }))
           guard generation == token, !Task.isCancelled else { return }
           var keys = Set(quick.map(\.id))
           let fresh = extra.filter { keys.insert($0.id).inserted }
@@ -219,8 +254,16 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
         }
         guard generation == token, !Task.isCancelled else { return }
         if let derived = catalog.first(where: { $0.profile == .xcodeWorkspace }) {
+          let outputBytes = Dictionary(
+            uniqueKeysWithValues: outputs.map {
+              (
+                $0.url.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent,
+                results[$0.id]?.bytes ?? 0
+              )
+            })
           let artifacts = try await ProjectAttribution.derive(
-            home: home, selected: projects, measurement: results[derived.id])
+            home: home, selected: selectedProjects, measurement: results[derived.id],
+            outputBytes: outputBytes)
           guard generation == token, !Task.isCancelled else { return }
           projectArtifacts = artifacts
         }
@@ -235,6 +278,12 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
             try await HistoryIO.shared.record(snapshot)
             guard generation == token, !Task.isCancelled else { return }
             if historyEnabled { history = Array(([snapshot] + history).prefix(35)) }
+            if historyEnabled {
+              let moves = try await HistoryIO.shared.movedFolders()
+              let readings = try await MovedFolder.regrown(moves, in: snapshot)
+              guard generation == token, !Task.isCancelled else { return }
+              if historyEnabled { regrownFolders = readings }
+            }
             historyError = nil
             #if MACPURGE_BUNDLE
               if historyEnabled, let url = WidgetSnapshot.location {
@@ -245,8 +294,12 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
                 WidgetCenter.shared.reloadTimelines(ofKind: "MacPurge.Disk")
               }
             #endif
-          } catch { historyError = error.localizedDescription }
+          } catch {
+            guard generation == token, !Task.isCancelled else { return }
+            historyError = error.localizedDescription
+          }
         }
+        guard generation == token, !Task.isCancelled else { return }
         storagePreview = nil
         pendingCategories = []
         phase = .finished
@@ -274,9 +327,14 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
     phase = .cancelled
   }
 
-  func chooseProjects() {
+  func chooseProjects() { chooseProjects(forLargeFolders: false) }
+  func chooseLargeFolders() { chooseProjects(forLargeFolders: true) }
+
+  private func chooseProjects(forLargeFolders: Bool) {
     let panel = NSOpenPanel()
-    panel.title = "Ölçülecek proje klasörlerini seç"
+    panel.title = ReviewLanguage.text(
+      forLargeFolders
+        ? "Büyük alt klasörlerin aranacağı konumları seç" : "Ölçülecek proje klasörlerini seç")
     panel.prompt = "Klasörleri ekle"
     panel.canChooseFiles = false
     panel.canChooseDirectories = true
@@ -284,7 +342,9 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
     panel.canCreateDirectories = false
     panel.resolvesAliases = true
     let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-      if response == .OK { self?.addProjects(panel.urls) }
+      guard response == .OK, let self, !cleanup.busy else { return }
+      if forLargeFolders { detailed = true }
+      addProjects(panel.urls)
     }
     if let window = NSApp.keyWindow {
       panel.beginSheetModal(for: window, completionHandler: completion)

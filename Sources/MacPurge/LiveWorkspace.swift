@@ -8,6 +8,7 @@ enum LiveSection: Hashable { case overview, storage, projects, plan, activity }
 
 struct LiveWorkspace: View {
   @Environment(\.openWindow) private var openWindow
+  @Environment(\.scenePhase) private var scenePhase
   let scan: LiveScan
   @Binding var section: LiveSection
   @State private var selectedIDs: Set<String> = []
@@ -42,7 +43,11 @@ struct LiveWorkspace: View {
         case .overview: LiveOverview(scan: scan, openStorage: { section = .storage })
         case .storage:
           StorageBrowser(scan: scan, selected: $selectedIDs, openPlan: { section = .plan })
-        case .projects: ProjectRootsView(scan: scan)
+        case .projects:
+          ProjectRootsView(scan: scan) { item in
+            selectedIDs.insert(item.id)
+            section = .plan
+          }
         case .plan: SpacePreview(scan: scan, selected: $selectedIDs)
         case .activity: ScanActivity(scan: scan)
         }
@@ -82,6 +87,21 @@ struct LiveWorkspace: View {
       }
     }
     .task { if scan.phase == .idle { scan.start() } }
+    .task(id: eligibilityRequest) {
+      guard eligibilityRequest != nil else { return }
+      await scan.refreshMoveStates()
+      if !Task.isCancelled, !scan.moveStates.isEmpty {
+        selectedIDs = selectedIDs.filter {
+          scan.moveStates[$0] == .ready && !scan.hiddenIDs.contains($0)
+        }
+      }
+    }
+  }
+  private var eligibilityRequest: UUID? {
+    guard [.storage, .projects, .plan].contains(section), scan.phase == .finished,
+      scenePhase == .active
+    else { return nil }
+    return scan.report?.id
   }
 }
 
@@ -105,7 +125,7 @@ private struct LiveOverview: View {
         if let report = scan.report {
           OverviewHighlights(
             report: report,
-            previous: scan.history.first { $0.id != report.id && $0.extended == report.extended },
+            previous: report.previous(in: scan.history),
             openStorage: openStorage)
         }
         HStack(spacing: 12) {
@@ -218,7 +238,7 @@ extension ScanGroup {
     case .apps: "Uygulama desteği, önbellekler ve medya kitaplıkları"
     case .tools: "Editörler, eklentiler ve geliştirme ortamları"
     case .runtimes: "Cihazlardan ayrı, yüklü simülatör imajları"
-    case .other: "Bilinen kategorilere girmeyen 500 MiB ve üzeri araç klasörleri"
+    case .other: "Araç konumlarında ve seçtiğin klasörlerde 500 MiB ve üzeri alt klasörler"
     case .temp: "macOS’un geçici dosya ve önbellek klasörleri"
     case .system: "Sistem önbellekleri, destek dosyaları ve komut satırı araçları"
     default: "Yerel envanter ve ölçüm kapsamı"
@@ -485,7 +505,9 @@ private struct MeasuredRoot: View {
     OverviewDisclosure(isExpanded: $expanded, compact: true) {
       VStack(alignment: .leading, spacing: 5) {
         Text(root.url.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-        if let result, result.measured {
+        if let usage = root.runtimeUsage {
+          RuntimeDetails(usage: usage)
+        } else if let result, result.measured {
           Text("\(result.files) dosya ölçüldü").font(.caption)
           if root.group == .projects {
             Text(
@@ -510,7 +532,7 @@ private struct MeasuredRoot: View {
     } label: {
       VStack(alignment: .leading, spacing: 4) {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-          Text(root.title).font(.callout.weight(.medium))
+          Text(ReviewLanguage.text(root.displayTitle)).font(.callout.weight(.medium))
           if let assessment { SafetyBadge(level: assessment.level) }
           Spacer(minLength: 2)
           Text(ReviewLanguage.text(amount)).font(.callout).foregroundStyle(.secondary)
@@ -557,18 +579,19 @@ struct SafetyBadge: View {
         Text(title)
       }
     }
-      .font(.caption.weight(.semibold))
-      .foregroundStyle(color)
-      .padding(.horizontal, 7).padding(.vertical, 2)
-      .background(color.opacity(0.12), in: Capsule())
-      .accessibilityElement(children: .ignore)
-      .accessibilityLabel(title)
-      .help(title)
+    .font(.caption.weight(.semibold))
+    .foregroundStyle(color)
+    .padding(.horizontal, 7).padding(.vertical, 2)
+    .background(color.opacity(0.12), in: Capsule())
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(title)
+    .help(title)
   }
 }
 
 private struct ProjectRootsView: View {
   let scan: LiveScan
+  let openPlan: (ReportItem) -> Void
   @State private var cardMessage: String?
   @State private var removableRoots: [URL]?
   var body: some View {
@@ -632,6 +655,25 @@ private struct ProjectRootsView: View {
                   artifact in
                   LabeledContent("Proje dışındaki DerivedData", value: byteLabel(artifact.bytes))
                     .help(artifact.url.path)
+                }
+                ForEach(
+                  scan.report?.items.filter { item in
+                    guard let path = item.workspace else { return false }
+                    return ProjectAttribution.owningRoot(workspace: path, selected: scan.projects)?
+                      .path == root.url.path
+                  } ?? []
+                ) { output in
+                  HStack {
+                    Text(output.name)
+                    Spacer()
+                    Text(byteLabel(output.bytes ?? 0)).monospacedDigit()
+                    Button("Alan planına ekle") { openPlan(output) }
+                      .disabled(
+                        scan.moveStates[output.id] != .ready || scan.hiddenIDs.contains(output.id))
+                  }
+                  if case .blocked(let reason) = scan.moveStates[output.id] {
+                    Text(reason).font(.caption).foregroundStyle(.secondary)
+                  }
                 }
                 if let date = row.sourceModified, Date.now.timeIntervalSince(date) > 60 * 86400 {
                   Note(

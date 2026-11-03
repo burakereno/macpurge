@@ -49,8 +49,8 @@ struct DiskView: View {
                 Text("kullanılabilir alan").font(.system(size: 14)).foregroundStyle(.white.opacity(0.78))
                 Spacer(minLength: 16)
                 GeometryReader { geo in
-                    Capsule().fill(Ink.mint)
                     Capsule().fill(Color(red: 0.37, green: 0.54, blue: 0.51))
+                    Capsule().fill(Ink.mint)
                         .frame(width: geo.size.width * max(0, min(1, 1 - CGFloat(disk.free) / CGFloat(disk.bytes))))
                 }.frame(height: 5)
                 HStack {

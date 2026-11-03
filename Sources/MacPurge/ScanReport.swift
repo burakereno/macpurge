@@ -20,6 +20,9 @@ struct ReportItem: Identifiable, Codable, Hashable, Sendable {
   let modified: Date?
   let parts: [String: Int64]
   let volume: Int32?
+  var workspace: String? = nil
+  var runtimeUsage: RuntimeUsage? = nil
+  var directoryInode: UInt64? = nil
 
   var complete: Bool { status == "complete" }
   var estimated: Bool { basis == "tool" }
@@ -35,7 +38,38 @@ struct ScanReport: Identifiable, Codable, Sendable {
   let items: [ReportItem]
   var groups: [String: Int64]? = nil
   var groupSafety: [String: SafetyBreakdown]? = nil
-  var measuredGroupBytes: [String: Int64]? = nil // Includes lower bounds; older reports lack this field.
+  var measuredGroupBytes: [String: Int64]? = nil  // Includes lower bounds; older reports lack this field.
+
+  var scope: String? = nil  // Old snapshots can be viewed, but do not describe their full scan scope.
+
+  static func scopeKey(extended: Bool, protected: Bool, projects: [URL]) -> String {
+    let fields =
+      [
+        "storage-v2", extended ? "detailed" : "quick",
+        extended && protected ? "protected" : "standard",
+      ] + projects.map(\.path).sorted()
+    return SHA256.hash(data: Data(fields.joined(separator: "\0").utf8)).map {
+      String(format: "%02x", $0)
+    }.joined()
+  }
+
+  func previous(in history: [Self]) -> Self? {
+    guard let scope else { return nil }
+    return history.first {
+      $0.id != id && $0.date < date && $0.scope == scope && $0.extended == extended
+    }
+  }
+
+  func makeDeltas(since previous: Self?) -> [String: Int64] {
+    guard let previous, let scope, scope == previous.scope, extended == previous.extended,
+      let groups, let prior = previous.groups
+    else { return [:] }
+    return groups.reduce(into: [:]) { deltas, entry in
+      if let before = prior[entry.key], before != entry.value {
+        deltas[entry.key] = entry.value - before
+      }
+    }
+  }
 
   static func make(
     roots: [ScanRoot], results: [String: RootSize], disk: VolumeReading?, extended: Bool,
@@ -80,7 +114,9 @@ struct ScanReport: Identifiable, Codable, Sendable {
             status: state,
             safety: assessment?.level.rawValue, reason: reason, basis: basis,
             eligibleBytes: eligible ? max(0, candidate) : 0,
-            modified: result.modified, parts: parts, volume: result.measuredDevice))
+            modified: result.modified, parts: parts, volume: result.measuredDevice,
+            workspace: root.workspace, runtimeUsage: root.runtimeUsage,
+            directoryInode: result.measuredInode))
       }
       let parts = Dictionary(
         uniqueKeysWithValues: result.largest.sorted { a, b in
@@ -95,7 +131,9 @@ struct ScanReport: Identifiable, Codable, Sendable {
           candidate: result.simulatorCacheBytes, profile: .simulatorCache, parts: [:])
       } else {
         append(
-          name: root.title, suffix: "", bytes: result.measured ? result.bytes : nil,
+          name: root.excludedDirectories.isEmpty
+            ? root.title : ReviewLanguage.text(root.displayTitle), suffix: "",
+          bytes: result.measured ? result.bytes : nil,
           candidate: result.bytes - result.sharedLinkBytes, profile: root.profile, parts: parts)
       }
     }
@@ -119,20 +157,24 @@ struct ScanReport: Identifiable, Codable, Sendable {
   }
 
   func growth(since previous: Self?) -> [(ReportItem, Int64)] {
-    guard let previous else { return [] }
+    guard let previous, let scope, previous.scope == scope, previous.extended == extended else {
+      return []
+    }
     let old = Dictionary(
-      previous.items.filter(\.complete).compactMap { item in item.bytes.map { (item.id, $0) } },
-      uniquingKeysWith: max)
+      previous.items.filter(\.complete).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     return items.compactMap { item in
-      guard item.complete, let bytes = item.bytes, let prior = old[item.id], bytes != prior else {
-        return nil
-      }
-      return (item, bytes - prior)
+      guard item.complete, let bytes = item.bytes, let prior = old[item.id],
+        prior.volume == item.volume, prior.workspace == item.workspace, prior.basis == item.basis,
+        let before = prior.bytes, bytes != before
+      else { return nil }
+      return (item, bytes - before)
     }.sorted { $0.1 > $1.1 }
   }
 
   func unusualGroups(previous: [Self]) -> [(String, Int64, Int64)] {
-    let comparable = previous.filter { $0.id != id && $0.extended == extended }.prefix(14)
+    guard let scope else { return [] }
+    let comparable = previous.filter { $0.id != id && $0.scope == scope && $0.extended == extended }
+      .prefix(14)
     return (groups ?? [:]).compactMap { name, bytes in
       let past = comparable.compactMap { $0.groups?[name] }.sorted()
       guard past.count >= 3 else { return nil }
@@ -198,6 +240,10 @@ struct ScanArchive: Sendable {
     if write {
       try execute(
         db, "CREATE TABLE IF NOT EXISTS scans (t REAL PRIMARY KEY, payload BLOB NOT NULL)")
+      try execute(
+        db,
+        "CREATE TABLE IF NOT EXISTS moved_folders (path TEXT PRIMARY KEY, t REAL NOT NULL, payload BLOB NOT NULL)"
+      )
     }
     return try body(db)
   }
@@ -257,6 +303,7 @@ struct ScanArchive: Sendable {
           db,
           "DELETE FROM scans WHERE t < unixepoch('now','-180 days') OR t NOT IN (SELECT t FROM scans ORDER BY t DESC LIMIT 400)"
         )
+        try execute(db, "DELETE FROM moved_folders WHERE t < unixepoch('now','-180 days')")
         try execute(db, "COMMIT")
       } catch {
         try? execute(db, "ROLLBACK")
@@ -265,11 +312,103 @@ struct ScanArchive: Sendable {
     }
   }
 
+  func remember(_ folders: [MovedFolder]) throws {
+    guard !folders.isEmpty else { return }
+    _ = try connection(write: true) { db in
+      try execute(db, "BEGIN IMMEDIATE")
+      do {
+        var statement: OpaquePointer?
+        guard
+          sqlite3_prepare_v2(
+            db, "INSERT OR REPLACE INTO moved_folders VALUES (?,?,?)", -1, &statement, nil)
+            == SQLITE_OK
+        else {
+          throw Failure(errorDescription: "Temizlik geçmişi yazılamadı.")
+        }
+        defer { sqlite3_finalize(statement) }
+        for folder in folders {
+          let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+          let data = try JSONEncoder().encode(folder)
+          sqlite3_reset(statement)
+          sqlite3_bind_text(statement, 1, folder.receipt.original.path, -1, transient)
+          sqlite3_bind_double(statement, 2, folder.receipt.date.timeIntervalSince1970)
+          let status = data.withUnsafeBytes {
+            sqlite3_bind_blob(statement, 3, $0.baseAddress, Int32($0.count), transient)
+            return sqlite3_step(statement)
+          }
+          guard status == SQLITE_DONE else {
+            throw Failure(errorDescription: "Temizlik geçmişi yazılamadı.")
+          }
+        }
+        try execute(
+          db,
+          "DELETE FROM moved_folders WHERE t < unixepoch('now','-180 days') OR path NOT IN (SELECT path FROM moved_folders ORDER BY t DESC LIMIT 400)"
+        )
+        try execute(db, "COMMIT")
+      } catch {
+        try? execute(db, "ROLLBACK")
+        throw error
+      }
+    }
+  }
+
+  func movedFolders() throws -> [MovedFolder] {
+    try connection(write: false) { db in
+      // Archives from 0.4.0 contain only scans.
+      guard
+        sqlite3_table_column_metadata(db, nil, "moved_folders", "path", nil, nil, nil, nil, nil)
+          == SQLITE_OK
+      else { return [] }
+      var query: OpaquePointer?
+      guard
+        sqlite3_prepare_v2(
+          db,
+          "SELECT payload FROM moved_folders WHERE t >= unixepoch('now','-180 days') ORDER BY t DESC LIMIT 400",
+          -1, &query, nil) == SQLITE_OK
+      else { throw Failure(errorDescription: "Temizlik geçmişi okunamadı.") }
+      defer { sqlite3_finalize(query) }
+      var result: [MovedFolder] = []
+      while true {
+        let status = sqlite3_step(query)
+        if status == SQLITE_DONE { return result }
+        guard status == SQLITE_ROW, let ptr = sqlite3_column_blob(query, 0) else {
+          throw Failure(errorDescription: "Temizlik geçmişi okunamadı.")
+        }
+        result.append(
+          try JSONDecoder().decode(
+            MovedFolder.self, from: Data(bytes: ptr, count: Int(sqlite3_column_bytes(query, 0)))))
+      }
+    } ?? []
+  }
+
+  func forgetMove(at path: String) throws {
+    _ = try connection(write: true) { db in
+      var query: OpaquePointer?
+      guard
+        sqlite3_prepare_v2(db, "DELETE FROM moved_folders WHERE path = ?", -1, &query, nil)
+          == SQLITE_OK
+      else { throw Failure(errorDescription: "Temizlik geçmişi güncellenemedi.") }
+      defer { sqlite3_finalize(query) }
+      sqlite3_bind_text(query, 1, path, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+      guard sqlite3_step(query) == SQLITE_DONE else {
+        throw Failure(errorDescription: "Temizlik geçmişi güncellenemedi.")
+      }
+    }
+  }
+
   func clear() throws {
     if FileManager.default.fileExists(atPath: file.path) {
       _ = try connection(write: true) { db in
         try execute(db, "PRAGMA secure_delete=ON")
-        try execute(db, "DELETE FROM scans")
+        try execute(db, "BEGIN IMMEDIATE")
+        do {
+          try execute(db, "DELETE FROM scans")
+          try execute(db, "DELETE FROM moved_folders")
+          try execute(db, "COMMIT")
+        } catch {
+          try? execute(db, "ROLLBACK")
+          throw error
+        }
       }
     }
   }
@@ -279,5 +418,8 @@ actor HistoryIO {
   static let shared = HistoryIO()
   func load() throws -> [ScanReport] { try ScanArchive.standard.read(limit: 35) }
   func record(_ report: ScanReport) throws { try ScanArchive.standard.save(report) }
+  func remember(_ folders: [MovedFolder]) throws { try ScanArchive.standard.remember(folders) }
+  func movedFolders() throws -> [MovedFolder] { try ScanArchive.standard.movedFolders() }
+  func forgetMove(at path: String) throws { try ScanArchive.standard.forgetMove(at: path) }
   func clear() throws { try ScanArchive.standard.clear() }
 }

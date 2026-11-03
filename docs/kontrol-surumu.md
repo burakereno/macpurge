@@ -1,6 +1,19 @@
-# MacPurge 0.3.0 kontrol sürümü
+# MacPurge 0.5.0 kontrol sürümü
 
-3 Kasım 2026. Taramalar salt okunurdur. Alan planındaki **Çöp’e taşımayı incele…** düğmesi, desteklenen Güvenli önbellekleri taşımadan önce her klasörün tam yolunu gösterir. Yerel geri alma kayıtları uygulama kapatılıp açıldığında da kullanılabilir.
+3 Kasım 2026. Taramalar salt okunurdur. Alan planındaki **Çöp’e taşımayı incele…** düğmesi, desteklenen Güvenli önbellekleri ve Xcode ara çıktılarını taşımadan önce her klasörün tam yolunu gösterir. Yerel geri alma kayıtları uygulama kapatılıp açıldığında da kullanılabilir.
+
+## 0.5.0’da deneme
+
+- **Depolama → Simülatör runtime’ları** bölümünde bir imajın ayrıntılarını aç. Son kullanım CoreSimulator’dan gelir. Tarih yoksa **Bildirilmedi** yazar. Bağlı cihazların adları ve kısa kimlikleri Genel Bakış’taki runtime satırında da görünür.
+- **Etkinlik → Yeniden büyüyen klasörler**, 0.5.0 ile geçmiş açıkken Çöp’e taşıdığın klasörleri sonraki taramalarda izler. Özgün yolda yeni bir klasör ölçülürse taşınan ve yeniden ölçülen boyutlar tarihleriyle görünür. Geri alınan klasörler liste dışıdır. Geçmişi temizlemek izleme kayıtlarını da temizler.
+- Depolama’da iki öğe seç, sonra kategori, Güvenli/İncele filtresi veya aramayı değiştir. Listenin altında toplam seçimin ve bu filtrenin dışında kalan seçim sayısı görünür.
+
+## 0.4.0’da deneme
+
+- **Proje klasörleri** ekranından bir Xcode projesinin klasörünü seç. Xcode’un kaydı bu projedeki mevcut çalışma alanını gösteriyorsa, derleme ara çıktısı ayrı görünür. **Alan planına ekle** ile tam yolu ve sonraki derlemeye etkisini görebilirsin. Xcode’u kapatıp çalışan derlemenin bitmesini bekle.
+- **Depolama** ekranında bir kategoriyi aç veya arama yap. **Taşınabilirleri seç** yalnızca o listede taşıma denetimini geçen öğeleri işaretler. Diğer satırların Plan sütununda nedeni yazar.
+- Geçmiş açıkken aynı proje seçimi ve tarama ayarlarıyla iki tarama tamamla. Boyutu değişen kategorinin yanında ve karşılaştırılabilen öğenin **Fark** sütununda değişim görünür. Eski kayıtlar geçmişte kalır. İlk fark için bu sürümle iki ölçüm gerekir.
+- **Depolama → Diğer büyük klasörler → Taranacak klasörü seç…** ile bir konum ekle. Ayrıntılı tarama, seçilen konumdaki diğer kategorilere ait olmayan, diskte en az 500 MiB yer kaplayan alt klasörleri **İncele** olarak gösterir.
 
 ## Mac’te deneme
 

@@ -89,19 +89,29 @@ struct StorageBrowser: View {
   private var report: ScanReport? {
     scan.phase == .running && scan.detailed ? scan.storagePreview : scan.report
   }
+  private var previous: ScanReport? {
+    guard scan.phase == .finished, let report else { return nil }
+    return report.previous(in: scan.history)
+  }
+
+  private func matchesFilters(_ item: ReportItem) -> Bool {
+    guard !scan.hiddenIDs.contains(item.id), category == nil || item.category == category?.rawValue,
+      filter == .all || (filter == .unavailable ? !item.complete : item.safety == filter.rawValue)
+    else { return false }
+    return text.isEmpty
+      || [
+        item.name, item.category, item.path,
+        ScanGroup(rawValue: item.category).map { ReviewLanguage.text($0.titleKey) } ?? "",
+      ].contains { $0.localizedCaseInsensitiveContains(text) }
+  }
+
   private var visible: [ReportItem] {
-    (report?.items ?? []).filter {
-      !scan.hiddenIDs.contains($0.id) && (category == nil || $0.category == category?.rawValue)
-        && (filter == .all
-          || (filter == .unavailable ? !$0.complete : $0.safety == filter.rawValue))
-        && (text.isEmpty
-          || [
-            $0.name, $0.category, $0.path,
-            ScanGroup(rawValue: $0.category).map { ReviewLanguage.text($0.titleKey) } ?? "",
-          ].contains(where: {
-            $0.localizedCaseInsensitiveContains(text)
-          }))
-    }.sorted(using: sorting)
+    (report?.items ?? []).filter(matchesFilters).sorted(using: sorting)
+  }
+
+  private var outsideFilter: Int {
+    // A row that hasn't been measured in a progressive scan isn't hidden by a filter.
+    (scan.report?.items ?? []).filter { selected.contains($0.id) && !matchesFilters($0) }.count
   }
 
   var body: some View {
@@ -134,6 +144,9 @@ struct StorageBrowser: View {
           } else if report?.extended == false || scan.phase == .cancelled {
             Button("Ayrıntılı tarama", action: scan.startDetailed)
           }
+          if category == .other {
+            Button("Taranacak klasörü seç…", action: scan.chooseLargeFolders)
+          }
           if !listing {
             Button("Tüm öğeler") { showsItems = true }
           }
@@ -144,7 +157,8 @@ struct StorageBrowser: View {
             storageTable.frame(width: slot.size.width, height: slot.size.height)
           } else {
             StorageCategoryIndex(
-              report: report, pending: scan.phase == .running ? scan.pendingCategories : []
+              report: report, pending: scan.phase == .running ? scan.pendingCategories : [],
+              changes: report?.makeDeltas(since: previous) ?? [:]
             ) { group in
               category = group
               showsItems = true
@@ -154,8 +168,14 @@ struct StorageBrowser: View {
         }
         HStack {
           if listing {
-            Text("\(visible.count) öğe · \(selected.count) seçim").font(.caption).foregroundStyle(
-              .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+              Text("\(visible.count) öğe · \(selected.count) seçim")
+              if !selected.isEmpty && (category != nil || filter != .all || !text.isEmpty) {
+                Text(
+                  String(
+                    format: ReviewLanguage.text("%lld seçim filtre dışında"), Int64(outsideFilter)))
+              }
+            }.font(.caption).foregroundStyle(.secondary)
           } else if let report {
             Text(ReviewLanguage.text(report.extended ? "Ayrıntılı tarama" : "Hızlı tarama"))
               .font(.caption.weight(.semibold))
@@ -164,6 +184,9 @@ struct StorageBrowser: View {
           }
           Spacer()
           if listing {
+            let movable = Set(visible.filter { scan.moveStates[$0.id] == .ready }.map(\.id))
+            Button("Taşınabilirleri seç") { selected.formUnion(movable) }
+              .disabled(movable.isSubset(of: selected) || scan.phase != .finished)
             Button("Ayrıntılar") { inspecting = true }.disabled(
               !visible.contains { $0.id == focus })
           }
@@ -175,7 +198,9 @@ struct StorageBrowser: View {
     }
     .searchable(text: $text, prompt: "Öğe, kategori veya konum ara")
     .sheet(isPresented: $inspecting) {
-      if let item = report?.items.first(where: { $0.id == focus }) { ItemInspector(item: item) }
+      if let item = report?.items.first(where: { $0.id == focus }) {
+        ItemInspector(item: item, moveState: scan.moveStates[item.id])
+      }
     }
   }
 
@@ -208,7 +233,9 @@ struct StorageBrowser: View {
   }
 
   private var storageTable: some View {
-    Table(visible, selection: $focus, sortOrder: $sorting) {
+    let changes = Dictionary(
+      uniqueKeysWithValues: (report?.growth(since: previous) ?? []).map { ($0.0.id, $0.1) })
+    return Table(visible, selection: $focus, sortOrder: $sorting) {
       TableColumn("Öğe", value: \.name) { row in Text(row.name).lineLimit(1) }.width(
         min: 130, ideal: 215)
       TableColumn("Etiket") { row in
@@ -222,13 +249,17 @@ struct StorageBrowser: View {
         Text(row.bytes.map(byteLabel) ?? "—").monospacedDigit().frame(
           maxWidth: .infinity, alignment: .trailing)
       }.width(min: 64, ideal: 83, max: 118)
+      TableColumn("Fark") { row in
+        if let delta = changes[row.id] { SizeChange(bytes: delta) }
+      }.width(min: 44, ideal: 68, max: 84)
       TableColumn("Değişiklik", value: \.sortDate) { row in
         Text(row.modified.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—").font(
           .caption
         ).foregroundStyle(.secondary)
       }.width(min: 68, ideal: 90, max: 116)
       TableColumn("Plan") { row in
-        if row.eligibleBytes > 0 {
+        switch scan.moveStates[row.id] {
+        case .ready:
           Toggle(
             "Plana ekle: \(row.name)",
             isOn: Binding(
@@ -237,8 +268,15 @@ struct StorageBrowser: View {
                 if value { selected.insert(row.id) } else { selected.remove(row.id) }
               })
           ).toggleStyle(.checkbox).labelsHidden().disabled(scan.phase == .running)
+        case .blocked(let reason):
+          Text(reason).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(reason)
+        case nil:
+          Text(
+            ReviewLanguage.text(scan.phase == .finished ? "Kontrol ediliyor…" : "Ölçüm bekleniyor")
+          )
+          .font(.caption).foregroundStyle(.secondary)
         }
-      }.width(39)
+      }.width(min: 100, ideal: 148, max: 210)
     }
     .contextMenu(forSelectionType: String.self) { ids in
       Button("Ayrıntıları göster") {
@@ -280,9 +318,127 @@ extension ReportItem {
   fileprivate var sortDate: Date { modified ?? .distantPast }
 }
 
+private struct ManagingTool {
+  let name: String
+  let bundleID: String
+  let guidance: String
+
+  var applicationURL: URL? {
+    if let installed = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+      return installed
+    }
+    for domain: FileManager.SearchPathDomainMask in [.localDomainMask, .userDomainMask] {
+      if let apps = FileManager.default.urls(for: .applicationDirectory, in: domain).first {
+        let url = apps.appending(path: name + ".app")
+        if Bundle(url: url)?.executableURL != nil { return url }
+      }
+    }
+    return nil
+  }
+
+  init?(_ item: ReportItem) {
+    switch ScanGroup(rawValue: item.category) {
+    case .docker:
+      (name, bundleID, guidance) = (
+        "Docker Desktop", "com.docker.docker",
+        "İmajları ve kullanılmayan verileri Docker Desktop’ta inceleyebilirsin."
+      )
+    case .android:
+      (name, bundleID, guidance) = (
+        "Android Studio", "com.google.android.studio",
+        "SDK bileşenleri için SDK Manager’ı, emülatörler için Device Manager’ı aç."
+      )
+    case .models where item.name.hasPrefix("Ollama"):
+      (name, bundleID, guidance) = (
+        "Ollama", "com.electron.ollama",
+        "Modelleri Ollama’da veya ollama list ile inceleyebilirsin."
+      )
+    case .models where item.name == "LM Studio":
+      (name, bundleID, guidance) = (
+        "LM Studio", "com.lmstudio.lmstudio",
+        "İndirilen modelleri LM Studio’daki My Models bölümünde inceleyebilirsin."
+      )
+    case .models where item.name == "Chrome yerel modeli":
+      (name, bundleID, guidance) = (
+        "Google Chrome", "com.google.Chrome",
+        "Yerel modelin kullanımını Chrome’da inceleyebilirsin."
+      )
+    default: return nil
+    }
+  }
+}
+
+struct RuntimeDetails: View {
+  let usage: RuntimeUsage
+  var compact = false
+  @State private var openError: String?
+
+  private var deviceRows: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      ForEach(usage.devices, id: \.id) { device in
+        HStack {
+          Text(device.name)
+          Spacer()
+          Text(String(device.id.uuidString.prefix(8))).monospaced().foregroundStyle(.secondary)
+        }.font(.callout)
+      }
+    }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      LabeledContent(
+        "Son kullanım",
+        value: usage.lastUsed?.formatted(date: .abbreviated, time: .shortened)
+          ?? ReviewLanguage.text("Bildirilmedi"))
+      HStack(spacing: 6) {
+        Text("Bağlı cihazlar").font(.headline)
+        if !usage.devices.isEmpty {
+          Text(usage.devices.count, format: .number).monospacedDigit().foregroundStyle(.secondary)
+        }
+      }
+      if usage.multipleImages {
+        Text(
+          "Aynı sürümün birden fazla imajı var. Cihazlar sürümle eşleşiyor; kullandıkları imaj doğrulanamadı."
+        )
+        .font(.caption).foregroundStyle(.secondary)
+      }
+      if !usage.deviceListComplete {
+        Text("Cihaz listesinin tamamı doğrulanamadı.").font(.caption).foregroundStyle(.secondary)
+      } else if usage.devices.isEmpty {
+        Text("Bağlı cihaz yok.").foregroundStyle(.secondary)
+      }
+      if !usage.devices.isEmpty {
+        if compact {
+          ViewThatFits(in: .vertical) {
+            deviceRows.fixedSize(horizontal: false, vertical: true)
+            ScrollView { deviceRows.padding(.trailing, 6) }
+          }.frame(maxHeight: 128, alignment: .top)
+        } else {
+          deviceRows
+        }
+      }
+      if let xcode = NSWorkspace.shared.urlForApplication(
+        withBundleIdentifier: "com.apple.dt.Xcode")
+      {
+        Button("Xcode’u aç") {
+          Task {
+            do {
+              _ = try await NSWorkspace.shared.openApplication(at: xcode, configuration: .init())
+            } catch { openError = error.localizedDescription }
+          }
+        }.help("Runtime’ları Xcode → Settings → Components bölümünde yönetebilirsin.")
+      }
+      if let openError { Text(openError).font(.caption) }
+    }
+  }
+}
+
 struct ItemInspector: View {
   let item: ReportItem
+  let moveState: MoveAvailability?
   @Environment(\.dismiss) private var dismiss
+  @State private var openError: String?
   var body: some View {
     VStack(alignment: .leading, spacing: 15) {
       SectionHead(
@@ -291,6 +447,13 @@ struct ItemInspector: View {
         SafetyBadge(level: level)
       }
       Text(ReviewLanguage.text(item.reason)).fixedSize(horizontal: false, vertical: true)
+      if case .blocked(let reason) = moveState { LabeledContent("Plan", value: reason) }
+      if let usage = item.runtimeUsage {
+        RuntimeDetails(usage: usage, compact: true)
+      }
+      if let workspace = item.workspace {
+        LabeledContent("Xcode projesi", value: workspace).textSelection(.enabled)
+      }
       LabeledContent("Ölçüm", value: item.bytes.map(byteLabel) ?? "Bilinmiyor")
       LabeledContent(
         "Kaynak",
@@ -307,6 +470,27 @@ struct ItemInspector: View {
         ForEach(item.parts.sorted { $0.value > $1.value }, id: \.key) { name, bytes in
           LabeledContent(name, value: byteLabel(bytes)).font(.callout)
         }
+      }
+      if let tool = ManagingTool(item) {
+        Divider()
+        Text(ReviewLanguage.text(tool.guidance)).font(.callout).foregroundStyle(.secondary)
+        if let url = tool.applicationURL {
+          Button(String(format: ReviewLanguage.text("%@ uygulamasını aç"), tool.name)) {
+            Task {
+              do {
+                _ = try await NSWorkspace.shared.openApplication(at: url, configuration: .init())
+              } catch { openError = error.localizedDescription }
+            }
+          }
+        }
+        if let openError { Text(openError).font(.caption) }
+      } else if ScanGroup(rawValue: item.category) == .models {
+        Text(
+          ReviewLanguage.text(
+            "Bu depoyu, modeli indiren araçtan yönetebilirsin. Paylaşılan model dosyaları birden fazla projede kullanılabilir."
+          )
+        )
+        .font(.callout).foregroundStyle(.secondary)
       }
       HStack {
         if !item.estimated && item.status != "unavailable" {
@@ -333,7 +517,8 @@ struct SpacePreview: View {
       )
       if let report = scan.report {
         let choices = report.items.filter {
-          selected.contains($0.id) && !scan.hiddenIDs.contains($0.id) && $0.eligibleBytes > 0
+          selected.contains($0.id) && !scan.hiddenIDs.contains($0.id)
+            && scan.moveStates[$0.id] == .ready
         }
         let bytes = choices.reduce(Int64(0)) { $0 + $1.eligibleBytes }
         let goal = Int64(target) * 1_000_000_000
@@ -345,8 +530,10 @@ struct SpacePreview: View {
               }.frame(maxWidth: 210)
               Spacer()
               Button("Adayları öner") {
-                selected = Set(report.plan(target: goal, excluding: scan.hiddenIDs).map(\.id))
-              }
+                let blocked = report.items.filter { scan.moveStates[$0.id] != .ready }.map(\.id)
+                selected = Set(
+                  report.plan(target: goal, excluding: scan.hiddenIDs.union(blocked)).map(\.id))
+              }.disabled(!scan.moveStates.values.contains(.ready))
             }
             ProgressView(value: Double(min(bytes, goal)), total: Double(goal)).tint(Ink.sea)
             Text("Seçilen \(byteLabel(bytes)) · Hedef \(byteLabel(goal))").font(.headline)
@@ -405,7 +592,7 @@ struct ScanActivity: View {
           }))
       if let message = scan.historyError { Note(symbol: "exclamationmark.triangle", text: message) }
       if let current = scan.history.first {
-        let prior = scan.history.dropFirst().first(where: { $0.extended == current.extended })
+        let prior = current.previous(in: scan.history)
         let growth = current.growth(since: prior).filter { $0.1 > 0 }
         if scan.history.compactMap(\.free).count > 1 {
           SectionHead(title: "Boş alan geçmişi")
@@ -424,6 +611,33 @@ struct ScanActivity: View {
           ForEach(unusual, id: \.0) { group, _, delta in
             LabeledContent(group, value: "+" + byteLabel(delta))
           }
+        }
+        SectionHead(title: "Yeniden büyüyen klasörler")
+        if let folders = scan.regrownFolders {
+          if folders.isEmpty {
+            Text("Son taramada, Çöp’e taşındıktan sonra yeniden yer kaplayan klasör bulunmadı.")
+              .font(.callout).foregroundStyle(.secondary)
+          }
+          ForEach(folders) { folder in
+            Surface {
+              VStack(alignment: .leading, spacing: 5) {
+                Text(folder.move.name).font(.headline)
+                Text((folder.move.receipt.original.path as NSString).abbreviatingWithTildeInPath)
+                  .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                LabeledContent(
+                  "Çöp’e taşınan",
+                  value: byteLabel(folder.move.receipt.bytes) + " · "
+                    + folder.move.receipt.date.formatted(date: .abbreviated, time: .shortened))
+                LabeledContent(
+                  "Yeniden ölçülen",
+                  value: byteLabel(folder.bytes) + " · "
+                    + folder.measuredAt.formatted(date: .abbreviated, time: .shortened))
+              }.padding(12)
+            }
+          }
+        } else {
+          Text("Temizlik geçmişi tamamlanan taramayla karşılaştırılacak.").font(.callout)
+            .foregroundStyle(.secondary)
         }
         SectionHead(title: "Büyüyen öğeler")
         if prior == nil {

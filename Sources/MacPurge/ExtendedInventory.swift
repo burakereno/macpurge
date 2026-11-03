@@ -51,7 +51,11 @@ enum InventoryCommand {
 }
 
 enum ExtendedInventory {
-  @concurrent static func discover(home: URL, includeProtected: Bool, selectedProjects: [URL] = [])
+  @concurrent static func discover(
+    home: URL, includeProtected: Bool, simulatorInventory: SimulatorInventory,
+    selectedProjects: [URL] = [],
+    projectMeasurements: [String: RootSize] = [:]
+  )
     async throws -> [ScanRoot]
   {
     var rows: [ScanRoot] = []
@@ -204,7 +208,8 @@ enum ExtendedInventory {
     for app in RenderCacheOwner.all {
       for cache in RenderCacheOwner.leaves {
         add(
-          .apps, app.folder + " · " + cache, "Library/Application Support/" + app.folder + "/" + cache,
+          .apps, app.folder + " · " + cache,
+          "Library/Application Support/" + app.folder + "/" + cache,
           .renderCache)
       }
     }
@@ -221,8 +226,15 @@ enum ExtendedInventory {
     let known = ScanRoot.catalog(home: home, projects: selectedProjects) + rows
     rows += try CategoryLocations.discover(
       home: home, known: known, includeProtected: includeProtected)
-    let tooling = try await toolReports(home: home)
-    return rows + tooling
+    let tooling = try await toolReports(home: home, devices: simulatorInventory)
+    rows += tooling
+    let claimed = (ScanRoot.catalog(home: home, projects: []) + rows).map(\.url)
+    for project in selectedProjects {
+      rows += try CategoryLocations.largeFolders(
+        in: project, excluding: claimed,
+        measurement: projectMeasurements[project.path])
+    }
+    return rows
   }
 
   private static func darwinUserDirectory(_ key: Int32) -> String? {
@@ -236,7 +248,45 @@ enum ExtendedInventory {
     return path.hasPrefix("/var/folders/") ? "/private" + path : path
   }
 
-  private static func toolReports(home: URL) async throws -> [ScanRoot] {
+  static func runtimeRows(
+    data: Data, devices: SimulatorInventory, sdkBuilds: Set<String>?, base: URL
+  ) throws -> [ScanRoot] {
+    struct Runtime: Decodable {
+      let runtimeIdentifier, path, build, lastUsedAt: String?
+      let sizeBytes: Int64?
+    }
+    let runtimes = try JSONDecoder().decode([String: Runtime].self, from: data)
+    let identifiers = runtimes.values.compactMap(\.runtimeIdentifier)
+    let devicesByRuntime = Dictionary(grouping: devices.roots.compactMap(\.device), by: \.runtime)
+    let dateParser = ISO8601DateFormatter()
+    let fractionalParser = ISO8601DateFormatter()
+    fractionalParser.formatOptions.insert(.withFractionalSeconds)
+    return runtimes.sorted { $0.key < $1.key }.map { key, item in
+      let identifier = item.runtimeIdentifier
+      let complete = identifier != nil && devices.note == nil && devicesByRuntime[nil] == nil
+      let linked = identifier.flatMap { devicesByRuntime[$0] } ?? []
+      let sameVersion = identifier.map { id in identifiers.filter { $0 == id }.count > 1 } ?? false
+      let usage = RuntimeUsage(
+        lastUsed: item.lastUsedAt.flatMap {
+          dateParser.date(from: $0) ?? fractionalParser.date(from: $0)
+        },
+        devices: linked.sorted { ($0.name, $0.id) < ($1.name, $1.id) },
+        deviceListComplete: complete, multipleImages: sameVersion)
+      let unused =
+        complete && linked.isEmpty
+        && item.build.flatMap { build in sdkBuilds.map { !$0.contains(build) } } == true
+      let id = (identifier ?? key).replacingOccurrences(
+        of: "com.apple.CoreSimulator.SimRuntime.", with: "")
+      let title = "\(id) · \(item.build ?? key)" + (unused ? " · SDK/cihaz eşleşmesi yok" : "")
+      return ScanRoot(
+        group: .runtimes, title: title,
+        url: item.path.map(URL.init(fileURLWithPath:)) ?? base.appending(path: key),
+        profile: .systemManaged, source: .report(item.sizeBytes), runtimeUsage: usage)
+    }
+  }
+
+  private static func toolReports(home: URL, devices: SimulatorInventory) async throws -> [ScanRoot]
+  {
     var rows: [ScanRoot] = []
     func toolError(_ group: ScanGroup, _ title: String, _ url: URL) {
       rows.append(
@@ -256,32 +306,7 @@ enum ExtendedInventory {
       let sdkBuilds = matches.map {
         Set($0.values.compactMap { $0["chosenRuntimeBuild"] as? String })
       }
-      let devices = try await SimulatorInventory.discover(
-        in: home.appending(path: "Library/Developer/CoreSimulator/Devices"))
-      let deviceRuntimes = Set(devices.roots.compactMap { $0.device?.runtime })
-      struct Runtime: Decodable {
-        let runtimeIdentifier: String?
-        let version: String?
-        let path: String?
-        let sizeBytes: Int64?
-        let build: String?
-      }
-      for (key, item) in try JSONDecoder().decode([String: Runtime].self, from: data).sorted(by: {
-        $0.key < $1.key
-      }) {
-        let id = (item.runtimeIdentifier ?? key).replacingOccurrences(
-          of: "com.apple.CoreSimulator.SimRuntime.", with: "")
-        let unused =
-          devices.note == nil && devices.roots.allSatisfy { $0.device?.runtime != nil }
-          && item.runtimeIdentifier.map { !deviceRuntimes.contains($0) } == true
-          && item.build.flatMap { build in sdkBuilds.map { !$0.contains(build) } } == true
-        let title = "\(id) · \(item.build ?? key)" + (unused ? " · SDK/cihaz eşleşmesi yok" : "")
-        rows.append(
-          .init(
-            group: .runtimes, title: title,
-            url: item.path.map(URL.init(fileURLWithPath:)) ?? runtimeRoot.appending(path: key),
-            profile: .systemManaged, source: .report(item.sizeBytes)))
-      }
+      rows += try runtimeRows(data: data, devices: devices, sdkBuilds: sdkBuilds, base: runtimeRoot)
     } catch is CancellationError { throw CancellationError() } catch {
       toolError(.runtimes, "Runtime envanteri", runtimeRoot)
     }

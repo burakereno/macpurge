@@ -28,6 +28,79 @@ struct StorageCategoriesTests {
     #expect(try Data(contentsOf: model.appending(path: "data")).count == 8192)
   }
 
+  @Test func selectedFolderDiscoveryRespectsThresholdOwnershipAndLinks() throws {
+    let fm = FileManager.default
+    let project = URL(fileURLWithPath: "/private/tmp").appending(path: UUID().uuidString)
+    defer { try? fm.removeItem(at: project) }
+    for name in ["big", "small", "reserved"] {
+      try fm.createDirectory(at: project.appending(path: name), withIntermediateDirectories: true)
+    }
+    try fm.createSymbolicLink(at: project.appending(path: "alias"), withDestinationURL: project)
+    let limit: Int64 = 500 * 1024 * 1024
+    let size = RootSize(largest: [
+      "big": limit, "small": limit - 1, "reserved": limit, "alias": limit,
+    ])
+    let rows = try CategoryLocations.largeFolders(
+      in: project, excluding: [project.appending(path: "reserved")], measurement: size)
+    #expect(rows.map(\.title) == ["big"])
+    #expect(rows.first?.profile.assessment(for: .complete)?.level == .review)
+  }
+
+  @Test func deltasRequireAnEarlierCompleteMeasurementWithTheSameScope() throws {
+    let project = URL(fileURLWithPath: "/work/A")
+    let scope = ScanReport.scopeKey(extended: true, protected: false, projects: [project])
+    let day = Date.now
+    func report(_ date: Date, _ scope: String?, _ groups: [String: Int64]) -> ScanReport {
+      .init(
+        id: UUID(), date: date, extended: true, free: nil, capacity: nil,
+        items: [], groups: groups, scope: scope)
+    }
+    let before = report(day, scope, ["Xcode": 50, "packages": 20, "partial": 32])
+    let after = report(day.addingTimeInterval(3), scope, ["Xcode": 70, "packages": 10])
+    let old = report(day, nil, ["Xcode": 500])
+    let protected = report(
+      day.addingTimeInterval(1),
+      ScanReport.scopeKey(extended: true, protected: true, projects: [project]), ["Xcode": 9])
+    let noProjects = report(
+      day.addingTimeInterval(2),
+      ScanReport.scopeKey(extended: true, protected: false, projects: []), ["Xcode": 4])
+    let previous = after.previous(in: [after, noProjects, protected, old, before])
+    #expect(previous?.id == before.id)
+    #expect(after.makeDeltas(since: previous) == ["Xcode": 20, "packages": -10])
+    #expect(after.makeDeltas(since: protected).isEmpty)
+    #expect(after.previous(in: [old]) == nil)
+  }
+
+  @Test func runtimeDetailsDistinguishUnknownUsagePartialAndDuplicateBuilds() throws {
+    let base = URL(fileURLWithPath: "/Library/Developer/CoreSimulator/Images")
+    let data = Data(
+      #"{"a":{"runtimeIdentifier":"iOS","build":"A","lastUsedAt":"2026-11-03T09:38:49Z"},"b":{"runtimeIdentifier":"iOS","build":"B","lastUsedAt":"2026-11-03T09:38:49.123Z"},"c":{"runtimeIdentifier":"tvOS","build":"C"}}"#
+        .utf8)
+    let phone = SimulatorDevice(id: UUID(), name: "Phone", runtime: "iOS")
+    let root = ScanRoot(group: .simulators, title: phone.name, url: base, device: phone)
+    var inventory = SimulatorInventory()
+    inventory.roots = [root]
+    let rows = try ExtendedInventory.runtimeRows(
+      data: data, devices: inventory, sdkBuilds: [], base: base)
+    #expect(rows[0].runtimeUsage?.lastUsed != nil && rows[1].runtimeUsage?.lastUsed != nil)
+    #expect(
+      rows[0].runtimeUsage?.devices == [phone] && rows[0].runtimeUsage?.multipleImages == true)
+    #expect(rows[2].runtimeUsage?.lastUsed == nil && rows[2].runtimeUsage?.devices.isEmpty == true)
+    #expect(
+      rows[2].runtimeUsage?.deviceListComplete == true && rows[2].title.contains("eşleşmesi yok"))
+    inventory.note = "Eksik"
+    let partial = try ExtendedInventory.runtimeRows(
+      data: data, devices: inventory, sdkBuilds: [], base: base)
+    #expect(
+      partial[2].runtimeUsage?.deviceListComplete == false
+        && !partial[2].title.contains("eşleşmesi yok"))
+    let report = ScanReport.make(
+      roots: rows, results: [rows[0].id: RootSize(bytes: 100)], disk: nil, extended: true,
+      homeDevice: nil)
+    let saved = try JSONDecoder().decode(ScanReport.self, from: JSONEncoder().encode(report))
+    #expect(saved.items.first?.runtimeUsage == rows[0].runtimeUsage)
+  }
+
   @Test func groupSummaryUsesDeduplicatedBytesAndDistinguishesMissingMeasurements() throws {
     var report = ScanReport(
       id: UUID(), date: .now, extended: true, free: nil, capacity: nil, items: [])

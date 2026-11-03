@@ -62,6 +62,24 @@ enum CategoryLocations {
     return roots
   }
 
+  static func largeFolders(in project: URL, excluding claimed: [URL], measurement: RootSize?) throws
+    -> [ScanRoot]
+  {
+    // Reuse the project's first-level totals to avoid walking every small subtree again.
+    // Link attribution can depend on visit order, so only prune from complete, unshared measurements.
+    let rows = try unclaimed(in: project, group: .other, profile: .unknown, excluding: claimed) {
+      name in
+      guard let measurement, measurement.state == .complete, measurement.sharedLinkBytes == 0 else {
+        return true
+      }
+      return measurement.largest[name, default: 0] >= 500 * 1024 * 1024
+    }
+    return rows.filter { row in
+      if case .file = row.source { return false }
+      return true
+    }
+  }
+
   static func unclaimed(
     in location: URL, group: ScanGroup, profile: StorageProfile,
     excluding known: [URL], allow: (String) -> Bool = { _ in true }

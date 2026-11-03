@@ -11,7 +11,13 @@ struct TrashTarget: Identifiable, Sendable {
   let name: String
   let path: URL
   let snapshot: CacheSnapshot
+  var workspace: String?
   var id: String { path.path }
+}
+
+enum MoveAvailability: Equatable, Sendable {
+  case ready
+  case blocked(String)
 }
 
 struct TrashPlan: Identifiable, Sendable {
@@ -64,21 +70,26 @@ actor CacheTrash {
     trash: userTrash)
   let home: URL
   let journal: URL
-  private let deviceIsShutdown: @Sendable (UUID) async throws -> Bool
+  private let simulatorStates: @Sendable () async throws -> [UUID: String]
+  private let xcodeIdle: @Sendable () async throws -> Bool
   private let trash: URL
 
   init(
     home: URL, journal: URL, trash: URL? = nil,
-    deviceIsShutdown: @escaping @Sendable (UUID) async throws -> Bool = CacheTrash.deviceIsShutdown
+    simulatorStates: @escaping @Sendable () async throws -> [UUID: String] = CacheTrash
+      .simulatorStates,
+    xcodeIdle: @escaping @Sendable () async throws -> Bool = CacheTrash.xcodeIdle
   ) {
     self.home = home
     self.journal = journal
     self.trash = trash ?? home.appending(path: ".Trash")
-    self.deviceIsShutdown = deviceIsShutdown
+    self.simulatorStates = simulatorStates
+    self.xcodeIdle = xcodeIdle
   }
 
   private enum Owner: Equatable {
     case package
+    case xcode
     case application(String)
     case simulator(UUID)
   }
@@ -106,6 +117,11 @@ actor CacheTrash {
     {
       return .application(app.bundle)
     }
+    if p.count == 7, Array(p.prefix(4)) == ["Library", "Developer", "Xcode", "DerivedData"],
+      p.suffix(2).joined(separator: "/") == ProjectAttribution.intermediates
+    {
+      return .xcode
+    }
     guard let device = simulator(p) else { return nil }
     var scope = SimulatorDirectory.device
     for component in p.dropFirst(5) {
@@ -115,7 +131,7 @@ actor CacheTrash {
     return scope == .cache ? .simulator(device) : nil
   }
 
-  static func deviceIsShutdown(_ id: UUID) async throws -> Bool {
+  static func simulatorStates() async throws -> [UUID: String] {
     struct Inventory: Decodable {
       struct Device: Decodable {
         let udid: String
@@ -126,12 +142,38 @@ actor CacheTrash {
     let data = try await InventoryCommand.output(
       "/usr/bin/xcrun", ["simctl", "list", "devices", "-j"])
     let devices = try JSONDecoder().decode(Inventory.self, from: data).devices.values.joined()
-    return devices.first(where: { UUID(uuidString: $0.udid) == id })?.state == "Shutdown"
+    return Dictionary(
+      devices.compactMap { device in
+        UUID(uuidString: device.udid).map { ($0, device.state) }
+      }, uniquingKeysWith: { first, _ in first })
   }
 
-  private func verifyIdle(_ owner: Owner) async throws {
+  static func xcodeIdle() async throws -> Bool {
+    let data = try await InventoryCommand.output("/bin/ps", ["-axo", "comm="])
+    let processes = String(decoding: data, as: UTF8.self).split(separator: "\n")
+    return !processes.isEmpty
+      && !processes.contains { command in
+        let name = URL(fileURLWithPath: command.trimmingCharacters(in: .whitespaces))
+          .lastPathComponent
+        return name == "Xcode" || name == "xcodebuild"
+      }
+  }
+
+  private func verifyWorkspace(_ path: URL, expected: String?) throws {
+    let derived = path.deletingLastPathComponent().deletingLastPathComponent()
+    guard let expected,
+      !expected.hasPrefix(home.appending(path: "Library/Developer/Xcode/DerivedData").path + "/"),
+      ProjectAttribution.workspace(of: derived) == expected
+    else { throw CleanupFailure("Xcode proje eşleşmesi doğrulanamadı.") }
+  }
+
+  private func verifyIdle(_ owner: Owner, states: [UUID: String]? = nil) async throws {
     switch owner {
     case .package: break
+    case .xcode:
+      guard try await xcodeIdle() else {
+        throw CleanupFailure("Xcode’u kapat ve derlemenin bitmesini bekle.")
+      }
     case .application(let bundle):
       if await MainActor.run(body: {
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundle).isEmpty
@@ -139,13 +181,18 @@ actor CacheTrash {
         throw CleanupFailure("Uygulamayı kapatıp yeniden dene.")
       }
     case .simulator(let id):
-      guard try await deviceIsShutdown(id) else {
+      let live: [UUID: String]
+      if let states { live = states } else { live = try await simulatorStates() }
+      if live[id] == "Booted" { throw CleanupFailure("Simülatör çalışıyor.") }
+      guard live[id] == "Shutdown" else {
         throw CleanupFailure("Simülatörün kapalı olduğu doğrulanamadı.")
       }
     }
   }
 
-  private func locations(_ row: ReportItem) async throws -> [URL] {
+  private func locations(_ row: ReportItem, projects: [URL], states: [UUID: String]?) async throws
+    -> [URL]
+  {
     let root = URL(fileURLWithPath: row.path)
     guard row.complete, row.safety == SafetyLevel.safe.rawValue, row.eligibleBytes > 0,
       row.basis == "allocated"
@@ -153,6 +200,11 @@ actor CacheTrash {
     if let owner = owner(root) {
       switch (owner, ScanGroup(rawValue: row.category)) {
       case (.package, .packages), (.application, .apps): break
+      case (.xcode, .xcode):
+        guard let workspace = row.workspace,
+          ProjectAttribution.owningRoot(workspace: workspace, selected: projects) != nil
+        else { throw CleanupFailure("Proje tarama listesinde değil.") }
+        try verifyWorkspace(root, expected: workspace)
       default: throw CleanupFailure("Öğe bu kategoriden taşınamaz.")
       }
       try await verifyIdle(owner)
@@ -163,7 +215,7 @@ actor CacheTrash {
     else {
       throw CleanupFailure("Bu konumda uygulama içinden işlem desteklenmiyor.")
     }
-    try await verifyIdle(.simulator(id))
+    try await verifyIdle(.simulator(id), states: states)
     let apps = root.appending(path: "data/Containers/Data/Application")
     var bases = [root.appending(path: "data")]
     do {
@@ -174,37 +226,86 @@ actor CacheTrash {
     return bases.flatMap { base in ["Library/Caches", "tmp"].map { base.appending(path: $0) } }
   }
 
+  private func targets(for row: ReportItem, projects: [URL], states: [UUID: String]?) async throws
+    -> [TrashTarget]
+  {
+    let paths = try await locations(row, projects: projects, states: states)
+    guard let device = row.volume, try TrashFiles.directory(home, { _, s in s.st_dev }) == device
+    else { throw CleanupFailure("Ölçülen disk değişti.") }
+    guard try TrashFiles.directory(trash, enumerate: false, { _, s in s.st_dev }) == device,
+      access(trash.path, W_OK | X_OK) == 0
+    else { throw CleanupFailure("Çöp bu diskte kullanılamıyor.") }
+    var targets: [TrashTarget] = []
+    for path in paths {
+      try Task.checkCancellation()
+      guard let owner = owner(path) else { throw CleanupFailure("Hedef yolu doğrulanamadı.") }
+      guard
+        !projects.contains(where: { $0.path == path.path || $0.path.hasPrefix(path.path + "/") })
+      else { throw CleanupFailure("Seçili proje klasörünü içeriyor.") }
+      do {
+        let stamp = try TrashFiles.snapshot(path, on: device, allowSymlinks: owner == .xcode)
+        if stamp.bytes > 0 {
+          targets.append(
+            .init(
+              itemID: row.id, name: row.name, path: path, snapshot: stamp, workspace: row.workspace)
+          )
+        }
+      } catch let error as POSIXError where error.code == .ENOENT { continue }
+    }
+    guard !targets.isEmpty else { throw CleanupFailure("Taşınabilecek ölçülmüş çıktı bulunamadı.") }
+    return targets
+  }
+
+  private func batchStates(for items: [ReportItem]) async -> [UUID: String] {
+    guard
+      items.contains(where: { $0.eligibleBytes > 0 && $0.category == ScanGroup.simulators.rawValue }
+      )
+    else { return [:] }
+    return (try? await simulatorStates()) ?? [:]
+  }
+
   func prepare(items: [ReportItem], reportID: UUID, projects: [URL]) async -> TrashPlan {
     var plan = TrashPlan(reportID: reportID)
+    let states = await batchStates(for: items)
     var seen = Set<String>()
     for row in items {
       do {
-        let paths = try await locations(row)
-        guard let device = row.volume,
-          try TrashFiles.directory(home, { _, s in s.st_dev }) == device
-        else { throw CleanupFailure("Ölçülen disk değişti.") }
-        var found = false
-        for path in paths {
-          try Task.checkCancellation()
-          guard owner(path) != nil else { throw CleanupFailure("Hedef yolu doğrulanamadı.") }
-          guard
-            !projects.contains(where: { $0.path == path.path || $0.path.hasPrefix(path.path + "/") }
-            )
-          else { throw CleanupFailure("Seçili proje klasörünü içeriyor.") }
-          do {
-            let stamp = try TrashFiles.snapshot(path, on: device)
-            guard stamp.bytes > 0 else { continue }
-            found = true
-            if seen.insert(path.path).inserted {
-              plan.targets.append(
-                .init(itemID: row.id, name: row.name, path: path, snapshot: stamp))
-            }
-          } catch let error as POSIXError where error.code == .ENOENT { continue }
-        }
-        if !found { throw CleanupFailure("Taşınabilecek ölçülmüş önbellek bulunamadı.") }
+        let paths = try await targets(for: row, projects: projects, states: states)
+        plan.targets += paths.filter { seen.insert($0.path.path).inserted }
       } catch { plan.skipped.append(row.name + " · " + error.localizedDescription) }
     }
     return plan
+  }
+
+  func availability(for items: [ReportItem], projects: [URL]) async throws -> [String:
+    MoveAvailability]
+  {
+    let states = await batchStates(for: items)
+    var output: [String: MoveAvailability] = [:]
+    for row in items {
+      try Task.checkCancellation()
+      let reason: String
+      if !row.complete {
+        reason = row.status == "partial" ? "Ölçüm eksik" : "Ölçülemedi"
+      } else if row.safety != SafetyLevel.safe.rawValue {
+        reason = "Yalnızca inceleme"
+      } else if row.bytes == 0 {
+        reason = "Klasör boş"
+      } else if row.eligibleBytes == 0 {
+        reason = "Taşımaya uygun alan yok"
+      } else {
+        do {
+          _ = try await targets(for: row, projects: projects, states: states)
+          output[row.id] = .ready
+          continue
+        } catch {
+          output[row.id] = .blocked(error.localizedDescription)
+          continue
+        }
+      }
+      output[row.id] = .blocked(ReviewLanguage.text(reason))
+    }
+    return output
   }
 
   private func receiptsFile(_ id: UUID) -> URL { journal.appending(path: id.uuidString + ".json") }
@@ -240,14 +341,18 @@ actor CacheTrash {
       }
       do {
         guard let owner = owner(target.path) else { throw CleanupFailure("Hedef desteklenmiyor.") }
-        let stamp = try TrashFiles.snapshot(target.path, on: target.snapshot.identity.device)
+        let stamp = try TrashFiles.snapshot(
+          target.path, on: target.snapshot.identity.device, allowSymlinks: owner == .xcode)
         guard stamp == target.snapshot else {
           throw CleanupFailure("Önizlemeden sonra değişti. Yeniden ölç.")
         }
-        if idle?.owner != owner || (idle?.time.duration(to: .now) ?? .seconds(2)) > .seconds(1) {
+        if owner == .xcode || idle?.owner != owner
+          || (idle?.time.duration(to: .now) ?? .seconds(2)) > .seconds(1)
+        {
           try await verifyIdle(owner)
           idle = (owner, .now)
         }
+        if owner == .xcode { try verifyWorkspace(target.path, expected: target.workspace) }
         try Task.checkCancellation()
         let r = TrashReceipt(
           id: UUID(), original: target.path, parent: stamp.parent,
@@ -270,7 +375,13 @@ actor CacheTrash {
         }
         // A writer may still have held an open descriptor while the directory was moved.
         // On a mismatch, restore only if the original name is still available.
-        if (try? TrashFiles.snapshot(destination, on: r.identity.device))?.digest != stamp.digest {
+        let sameProject =
+          owner != .xcode || (try? verifyWorkspace(target.path, expected: target.workspace)) != nil
+        if !sameProject
+          || (try? TrashFiles.snapshot(
+            destination, on: r.identity.device, allowSymlinks: owner == .xcode))?.digest
+            != stamp.digest
+        {
           do {
             try TrashFiles.move(
               destination, to: target.path, identity: r.identity,

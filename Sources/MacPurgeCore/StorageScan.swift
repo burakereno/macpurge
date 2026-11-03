@@ -36,7 +36,13 @@ package struct ScanRoot: Identifiable, Hashable, Sendable {
   package let url: URL
   package let profile: StorageProfile
   package let device: SimulatorDevice?
+  package let runtimeUsage: RuntimeUsage?
+  package let workspace: String?
+  package var excludedDirectories: Set<String> = []
   package let source: MeasurementSource
+  package var displayTitle: String {
+    excludedDirectories.isEmpty ? title : "DerivedData · diğer içerik"
+  }
   package var id: String {
     switch source {
     case .allocation, .report, .status: "\(group.rawValue)|\(url.path)|\(title)"
@@ -46,13 +52,16 @@ package struct ScanRoot: Identifiable, Hashable, Sendable {
 
   package init(
     group: ScanGroup, title: String, url: URL, profile: StorageProfile = .unknown,
-    device: SimulatorDevice? = nil, source: MeasurementSource = .directory
+    device: SimulatorDevice? = nil, source: MeasurementSource = .directory,
+    workspace: String? = nil, runtimeUsage: RuntimeUsage? = nil
   ) {
     self.group = group
     self.title = title
     self.url = url
     self.profile = profile
     self.device = device
+    self.runtimeUsage = runtimeUsage
+    self.workspace = workspace
     self.source = source
   }
 
@@ -107,6 +116,7 @@ package struct RootSize: Sendable {
   package var sourceModified: Date?
   package var lastBuild: Date?
   package var outputKinds: [String: Int64] = [:]
+  package var measuredInode: ino_t?
   package var measuredDevice: dev_t?
   package var simulatorCacheBytes: Int64 = 0
   package var sharedLinkBytes: Int64 = 0
@@ -247,13 +257,15 @@ package enum StorageMeter {
       return RootSize(state: .unavailable("Klasör bilgisi okunamadı"))
     }
     var walk = Walk(device: info.st_dev, project: root.group == .projects)
+    walk.result.measuredInode = info.st_ino
     walk.result.measuredDevice = info.st_dev
     let output =
       root.group == .projects && outputFolders.contains(root.url.lastPathComponent)
       ? root.url.lastPathComponent : nil
     try walk.visit(
       fd, level: 0, branch: "", output: output, sourceTree: true,
-      scope: root.group == .simulators ? .device : .other)
+      scope: root.group == .simulators ? .device : .other,
+      exclusions: root.excludedDirectories.map { $0.split(separator: "/")[...] })
     // A cache file also linked from Documents, another device, or an
     // unreadable location belongs to the review side of the split.
     for (key, links) in walk.cacheLinks {
@@ -277,7 +289,7 @@ package enum StorageMeter {
     /// Takes ownership of fd, even if enumeration fails or is cancelled.
     mutating func visit(
       _ fd: Int32, level: Int, branch: String, output: String?, sourceTree: Bool,
-      scope: SimulatorDirectory
+      scope: SimulatorDirectory, exclusions: [ArraySlice<Substring>]
     ) throws {
       guard let dir = fdopendir(fd) else {
         close(fd)
@@ -308,10 +320,15 @@ package enum StorageMeter {
             guard type == S_IFDIR || type == S_IFREG else { return }
             let needsName =
               level == 0
-              || (type == S_IFDIR && ((project && output == nil) || scope.checksChildName))
+              || (type == S_IFDIR
+                && ((project && output == nil) || scope.checksChildName || !exclusions.isEmpty))
             let childName = needsName ? String(cString: name) : ""
             let bucket = level == 0 ? (type == S_IFDIR ? childName : "Kök dosyaları") : branch
             if type == S_IFDIR {
+              let nested = exclusions.compactMap { path in
+                path.first == childName[...] ? path.dropFirst() : nil
+              }
+              if nested.contains(where: { $0.isEmpty }) { return }
               guard level < 160 else {
                 result.missed += 1
                 return
@@ -334,7 +351,7 @@ package enum StorageMeter {
                 output: output
                   ?? (project && StorageMeter.outputFolders.contains(childName) ? childName : nil),
                 sourceTree: sourceTree && childName != ".git",
-                scope: scope.descending(into: childName))
+                scope: scope.descending(into: childName), exclusions: nested)
               return
             }
             let bytes = max(0, Int64(info.st_blocks)) * 512

@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-package struct SimulatorDevice: Hashable, Sendable {
+package struct SimulatorDevice: Hashable, Codable, Sendable {
   package let id: UUID
   package let name: String
   package let runtime: String?
@@ -16,6 +16,22 @@ package struct SimulatorDevice: Hashable, Sendable {
       return version.isEmpty ? String(platform) : "\(platform) \(version)"
     }
     return [display, String(id.uuidString.prefix(8))].compactMap { $0 }.joined(separator: " · ")
+  }
+}
+
+package struct RuntimeUsage: Hashable, Codable, Sendable {
+  package let lastUsed: Date?
+  package let devices: [SimulatorDevice]
+  package let deviceListComplete: Bool
+  package let multipleImages: Bool
+
+  package init(
+    lastUsed: Date?, devices: [SimulatorDevice], deviceListComplete: Bool, multipleImages: Bool
+  ) {
+    self.lastUsed = lastUsed
+    self.devices = devices
+    self.deviceListComplete = deviceListComplete
+    self.multipleImages = multipleImages
   }
 }
 

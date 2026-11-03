@@ -42,7 +42,9 @@ enum TrashFiles {
 
   static func posix() -> POSIXError { POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
 
-  static func snapshot(_ url: URL, on device: Int32) throws -> CacheSnapshot {
+  static func snapshot(_ url: URL, on device: Int32, allowSymlinks: Bool = false) throws
+    -> CacheSnapshot
+  {
     try directory(url.deletingLastPathComponent(), enumerate: false) { parent, parentInfo in
       try directory(url) { fd, info in
         guard info.st_dev == device, info.st_uid == getuid() else {
@@ -51,7 +53,9 @@ enum TrashFiles {
         var hash = SHA256()
         var links = [FileIdentity: Int]()
         var bytes: Int64 = 0
-        try walk(fd, device: device, depth: 0, hash: &hash, links: &links, bytes: &bytes)
+        try walk(
+          fd, device: device, depth: 0, allowSymlinks: allowSymlinks, hash: &hash, links: &links,
+          bytes: &bytes)
         guard links.values.allSatisfy({ $0 == 0 }) else {
           throw CleanupFailure("Klasör dışında bağlantısı olan dosya içeriyor.")
         }
@@ -70,7 +74,7 @@ enum TrashFiles {
   }
 
   private static func walk(
-    _ fd: Int32, device: Int32, depth: Int, hash: inout SHA256,
+    _ fd: Int32, device: Int32, depth: Int, allowSymlinks: Bool, hash: inout SHA256,
     links: inout [FileIdentity: Int], bytes: inout Int64
   ) throws {
     guard depth < 160 else { throw CleanupFailure("Klasör çok derin.") }
@@ -106,7 +110,7 @@ enum TrashFiles {
         throw CleanupFailure("Sahip veya disk farklı.")
       }
       let type = s.st_mode & S_IFMT
-      guard type == S_IFREG || type == S_IFDIR else {
+      guard type == S_IFREG || type == S_IFDIR || (allowSymlinks && type == S_IFLNK) else {
         throw CleanupFailure("Bağlantı veya özel dosya içeriyor.")
       }
       hash.update(data: Data(name.utf8))
@@ -115,6 +119,8 @@ enum TrashFiles {
         data: Data(
           "\(depth) \(s.st_ino) \(s.st_mode) \(s.st_size) \(s.st_nlink) \(s.st_ctimespec.tv_sec) \(s.st_ctimespec.tv_nsec)\n"
             .utf8))
+      // Generated framework links move as directory entries. Never open or follow their destination.
+      if type == S_IFLNK { continue }
       if type == S_IFREG {
         let key = FileIdentity(s)
         if let remaining = links[key] {
@@ -131,7 +137,9 @@ enum TrashFiles {
         guard fstat(child, &opened) == 0, FileIdentity(opened) == FileIdentity(s) else {
           throw CleanupFailure("Klasör ölçülürken değişti.")
         }
-        try walk(child, device: device, depth: depth + 1, hash: &hash, links: &links, bytes: &bytes)
+        try walk(
+          child, device: device, depth: depth + 1, allowSymlinks: allowSymlinks, hash: &hash,
+          links: &links, bytes: &bytes)
       }
     }
   }

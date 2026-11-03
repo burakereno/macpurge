@@ -31,7 +31,15 @@ enum CategorySize: Equatable {
     guard let report else { return .waiting }
     if !report.extended && !group.includedInQuickScan { return .outsideScope }
     let key = group.rawValue
-    if let complete = report.groups?[key] { return .bytes(complete, lowerBound: false) }
+    if let complete = report.groups?[key] {
+      if complete == 0, !report.items.contains(where: { $0.category == key }),
+        report.groupSafety?[key] == nil,
+        report.scope != nil
+      {
+        return .empty
+      }
+      return .bytes(complete, lowerBound: false)
+    }
     if let measured = report.measuredGroupBytes?[key] { return .bytes(measured, lowerBound: true) }
     if pending.contains(group) { return .waiting }
     return report.items.contains { $0.category == key } ? .unavailable : .empty
@@ -56,6 +64,7 @@ enum CategorySize: Equatable {
 struct StorageCategoryIndex: View {
   let report: ScanReport?
   let pending: Set<ScanGroup>
+  let changes: [String: Int64]
   let open: (ScanGroup) -> Void
 
   var body: some View {
@@ -76,7 +85,7 @@ struct StorageCategoryIndex: View {
             open(group)
           } label: {
             CategoryStorageRow(
-              group: group, reading: reading,
+              group: group, reading: reading, delta: changes[group.rawValue],
               breakdown: report?.groupSafety?[group.rawValue], largest: largest
             )
             .padding(.vertical, 10).padding(.horizontal, 12).contentShape(Rectangle())
@@ -93,6 +102,7 @@ struct StorageCategoryIndex: View {
 private struct CategoryStorageRow: View {
   let group: ScanGroup
   let reading: CategorySize
+  let delta: Int64?
   let breakdown: SafetyBreakdown?
   let largest: Int64
 
@@ -103,8 +113,10 @@ private struct CategoryStorageRow: View {
         HStack(alignment: .firstTextBaseline) {
           Text(ReviewLanguage.text(group.titleKey)).font(.headline)
           Spacer(minLength: 6)
+          if let delta { SizeChange(bytes: delta) }
           Text(reading.label).font(.callout.weight(.semibold)).monospacedDigit()
             .foregroundStyle(reading.bytes == nil ? Color.secondary : .primary)
+            .frame(width: 108, alignment: .trailing)
         }
         Text(ReviewLanguage.text(group.detail)).font(.caption).foregroundStyle(.secondary)
           .lineLimit(2)
@@ -132,6 +144,15 @@ private struct CategoryStorageRow: View {
     if partial {
       Text(ReviewLanguage.text("Ölçülen kısım")).font(.caption2).foregroundStyle(.secondary)
     }
+  }
+}
+
+struct SizeChange: View {
+  let bytes: Int64
+  var body: some View {
+    Text((bytes > 0 ? "+" : "−") + byteLabel(abs(bytes)))
+      .font(.caption).monospacedDigit().foregroundStyle(bytes > 0 ? Ink.gold : Ink.sea)
+      .lineLimit(1).help(ReviewLanguage.text("Önceki eş kapsamlı taramaya göre değişim"))
   }
 }
 

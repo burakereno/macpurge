@@ -11,6 +11,7 @@ package actor MeasurementCache {
   package private(set) var hits = 0
 
   package struct Ticket: Equatable, Sendable {
+    let excludedDirectories: Set<String>
     let generation: UInt64
     let device: dev_t
     let inode: ino_t
@@ -55,7 +56,8 @@ package actor MeasurementCache {
     }
     guard let generation, generation != 0 else { return nil }
     return Ticket(
-      generation: generation, device: info.st_dev, inode: info.st_ino,
+      excludedDirectories: root.excludedDirectories, generation: generation, device: info.st_dev,
+      inode: info.st_ino,
       changeSeconds: info.st_ctimespec.tv_sec, changeNanoseconds: info.st_ctimespec.tv_nsec)
   }
 

@@ -19,6 +19,7 @@
 		3E89C1FB5A4B6AA3823DC9D7 /* StorageCategories.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C7F88A9316E883611393FD5 /* StorageCategories.swift */; };
 		43AF0EF421C9D46E0891FC9A /* MeasurementCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA4BBF253C542BF43D6E83C /* MeasurementCache.swift */; };
 		4649A4A373005B96100AD323 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C470571ED188582E270E08 /* WidgetSnapshot.swift */; };
+		50DB343DB5535ECD988A0B56 /* Regrowth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9222B4636CD49F100455E /* Regrowth.swift */; };
 		517AD6A169723DDCE5DC2149 /* SimulatorDevices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F801EC7A6CADC347E69F604 /* SimulatorDevices.swift */; };
 		521FC7AF8F125D99DF0F6DC1 /* Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7909D233E729AF03DE0E36BC /* Demo.swift */; };
 		534D27DF7FD9549287588F79 /* TrashFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA734828E3EBBA4EB89A77E1 /* TrashFiles.swift */; };
@@ -86,6 +87,7 @@
 		54405A12CF559393C9136E92 /* MacPurgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPurgeApp.swift; sourceTree = "<group>"; };
 		5B3E7CC5E344ECE540889884 /* MacPurge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacPurge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5F801EC7A6CADC347E69F604 /* SimulatorDevices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatorDevices.swift; sourceTree = "<group>"; };
+		67C9222B4636CD49F100455E /* Regrowth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Regrowth.swift; sourceTree = "<group>"; };
 		72B3B9D518DBBA7D904B751C /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		765998B88B47307B5C4ED42C /* MacPurgeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPurgeWidget.swift; sourceTree = "<group>"; };
 		78FDB4DE2C51CB7E36C6A8DA /* tr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = tr; path = tr.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -143,6 +145,7 @@
 				54405A12CF559393C9136E92 /* MacPurgeApp.swift */,
 				E93DBC2C004A0E41660E117E /* PayloadVerification.swift */,
 				C01B489289313F81EAC3B6B5 /* ProjectAttribution.swift */,
+				67C9222B4636CD49F100455E /* Regrowth.swift */,
 				3F6C5E75E6D3FCB104D18486 /* ReviewViews.swift */,
 				0920656BBBB30F2A0BCD75DE /* ScanReport.swift */,
 				3F6E8171F38D4346A63BDB9D /* StartupProbe.swift */,
@@ -335,6 +338,7 @@
 				43AF0EF421C9D46E0891FC9A /* MeasurementCache.swift in Sources */,
 				53AAB6C044AE28B8A86FE164 /* PayloadVerification.swift in Sources */,
 				59F1B05E374424D59427CE70 /* ProjectAttribution.swift in Sources */,
+				50DB343DB5535ECD988A0B56 /* Regrowth.swift in Sources */,
 				9BEBCE34F343D81E2787A79E /* ReviewViews.swift in Sources */,
 				955810AEDC26A8BAEF2D157C /* ScanReport.swift in Sources */,
 				517AD6A169723DDCE5DC2149 /* SimulatorDevices.swift in Sources */,
@@ -424,7 +428,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 18;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -445,7 +449,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.3.0;
+				MARKETING_VERSION = 0.5.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -512,7 +516,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 18;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -527,7 +531,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.3.0;
+				MARKETING_VERSION = 0.5.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

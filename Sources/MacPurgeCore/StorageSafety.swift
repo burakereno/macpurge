@@ -13,7 +13,7 @@ package struct SafetyAssessment: Equatable, Sendable {
 package enum StorageProfile: Sendable {
   case npmCache, goBuildCache, xcodeWorkspace, packageDownloads, sharedDependencies, uvCache,
     project, unknown
-  case simulatorCache, simulatorData
+  case simulatorCache, simulatorData, xcodeIntermediate
   case logs, personal, systemManaged, renderCache
 
   package func assessment(for state: ReadState?) -> SafetyAssessment? {
@@ -38,6 +38,10 @@ package enum StorageProfile: Sendable {
         level: .safe,
         reason: "Go bu çıktıları sonraki derlemede yeniden üretir. İlk derleme daha uzun sürebilir."
       )
+    case .xcodeIntermediate:
+      return .init(
+        level: .safe,
+        reason: "Xcode ara çıktıları yeniden üretir. Sonraki derleme daha uzun sürebilir.")
     case .xcodeWorkspace:
       return .init(
         level: .review,

@@ -45,6 +45,11 @@ import SwiftUI
     work = Task {
       let result = await CacheTrash.shared.apply(plan)
       outcome = result
+      if scan.historyEnabled {
+        do { try await HistoryIO.shared.remember(MovedFolder.from(result, plan: plan)) } catch {
+          message = error.localizedDescription
+        }
+      }
       await refresh()
       busy = false
       applying = false
@@ -64,6 +69,9 @@ import SwiftUI
       do {
         try await CacheTrash.shared.restore(receipt.id)
         message = ReviewLanguage.text("Geri alındı") + " · " + receipt.original.path
+        do { try await scan.forgetRegrowth(at: receipt.original.path) } catch {
+          message = (message ?? "") + " · " + error.localizedDescription
+        }
       } catch {
         message = ReviewLanguage.text("Geri alınamadı") + " · " + error.localizedDescription
       }
@@ -99,7 +107,7 @@ struct CleanupControls: View {
           } else {
             Text(
               ReviewLanguage.text(
-                session.applying ? "Çöp’e taşınıyor…" : "Önbellekler doğrulanıyor…"))
+                session.applying ? "Çöp’e taşınıyor…" : "Seçilen klasörler doğrulanıyor…"))
             Button("Durdur") { session.cancel() }
           }
         }
@@ -159,6 +167,14 @@ struct CleanupControls: View {
                   Text(target.name).bold()
                   Spacer()
                   Text(byteLabel(target.snapshot.bytes))
+                }
+                if let workspace = target.workspace {
+                  Text(workspace).font(.caption).textSelection(.enabled)
+                  Text(
+                    ReviewLanguage.text(
+                      "Xcode ara çıktıları yeniden üretir. Sonraki derleme daha uzun sürebilir.")
+                  )
+                  .font(.caption).foregroundStyle(.secondary)
                 }
                 Text(target.path.path).font(.caption).foregroundStyle(.secondary).textSelection(
                   .enabled)
