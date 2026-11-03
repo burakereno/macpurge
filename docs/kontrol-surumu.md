@@ -1,12 +1,12 @@
-# MacPurge 0.2.13 kontrol sürümü
+# MacPurge 0.3.0 kontrol sürümü
 
-3 Kasım 2026. Kullanıcının son kapsam kararı doğrultusunda bu sürüm salt okunur. Tarama ve plan motorları ölçülen konumlarda yalnızca metadata ve izin verilen araç kayıtlarını okur. Kullanıcı tercihleri, geçmiş ve widget özeti MacPurge’ün kendi depolamasında tutulur.
+3 Kasım 2026. Taramalar salt okunurdur. Alan planındaki **Çöp’e taşımayı incele…** düğmesi, desteklenen Güvenli önbellekleri taşımadan önce her klasörün tam yolunu gösterir. Yerel geri alma kayıtları uygulama kapatılıp açıldığında da kullanılabilir.
 
 ## Mac’te deneme
 
 1. [MacPurge uygulamasını](../dist/MacPurge.app) aç. Genel bakış son tamamlanmış taramayı, gerçek boş alanı ve en büyük üç öğeyi gösterir. Yeni tarama ilerledikçe kategori ölçümleri gelir. Bir kategorinin veya alt öğenin satırına tıklayarak ayrıntılarını açıp kapatabilirsin. Odaklanan satırda sağ ok ayrıntıları açar, sol ok kapatır.
 2. **Depolama** açılışta kategorileri ölçülen boyuta göre sıralar. Çubukların yeşil kısmı Güvenli, turuncu kısmı İncele olarak ölçülen alanı gösterir; iki boyut da altında yazılıdır. Çubuklar en büyük kategoriyle aynı ölçektedir. Kategoriye tıklayarak öğelerini veya **Tüm öğeler** ile düz listeyi aç. İsim, kategori veya yol ara. Güvenli ve İncele filtrelerini dene. Bir öğeyi çift tıklayarak yolu, ölçüm kaynağını, tarihi ve sınıflandırma gerekçesini gör. Sağ tuşla bir öğeyi önerilerden gizleyebilirsin.
-3. **Alan planı** ekranında bir hedef belirleyip **Adayları öner** düğmesine bas. Yalnızca tam ölçülmüş, Güvenli etiketli ve ev klasörüyle aynı diskteki adaylar seçilir. Paylaşılan dosyalar için ölçüm muhafazakârdır. Planı değiştirmek boş disk alanını değiştirmez.
+3. **Alan planı** ekranında bir hedef belirleyip **Adayları öner** düğmesine bas. Yalnızca tam ölçülmüş, Güvenli etiketli ve ev klasörüyle aynı diskteki adaylar seçilir. Paylaşılan dosyalar için ölçüm muhafazakârdır. Seçimi kontrol et, **Çöp’e taşımayı incele…** ile hedefleri gör ve **Çöp’e taşı** ile onayla. Aynı sayfada taşınan boyut, atlanan yollar, diskte gözlenen boş alan değişimi ve **Geri al** bulunur. Çöp aynı diskte yer kaplar. Özgün yolda yeni bir klasör oluştuysa geri alma durur.
 4. Açılışta ayrıntılı tarama başlar. **Tarama kapsamı → Hızlı tarama** ile daha dar bir tarama yapabilirsin. Docker yalnızca bir yerel soket mevcutsa sorgulanır. Araç kapalıysa veya boyut bildirmiyorsa durum açıklanır. Korumalı konumlar Ayarlar’dan ayrıca etkinleştirilir.
 5. **Proje klasörleri** ekranında seçtiğin kökün toplamını, bilinen çıktı dizinlerini, son kaynak ve derleme tarihlerini incele. Xcode çalışma alanı metadatası eşleşirse proje dışında kalan DerivedData gösterilir. Harici disk önerileri önce listelenir, tarama için klasörü kendin eklersin.
 6. **Etkinlik** tamamlanmış yerel SQLite kayıtlarını karşılaştırır. Aynı kapsamda yeterli geçmiş olduğunda büyüme gösterilir. Geçmişi kapatmak kayıtları temizler. Menü çubuğu, bildirimler ve günlük hızlı tarama isteğe bağlıdır.
@@ -38,7 +38,7 @@
 - Başlangıç profillemesi ayrı bir Release yapılandırmasında 10 gerçek uygulama açılışından alındı. Açma komutundan görünür pencereye p95 910,3 ms, ilk ölçülen gerçek konuma p95 1.472,4 ms. Bunlar bu Mac’in sonuçlarıdır.
 - Yerel DMG salt okunur bağlandı ve içindeki uygulamanın iç içe imzaları doğrulandı. Kaynaklarından biri değiştirilmiş paket reddedildi.
 
-Asıl yol haritasındaki canlı Çöp’e taşıma, kalıcı araç işlemleri, otomatik silme ve yerinde sıkıştırma kontrol sürümünün dışında tutuldu. Noter onayı, çevrimiçi güncelleme ve herkese açık dağıtım ayrı yayın adımlarıdır. Başlangıç diskindeki ölçülen alan APFS klonlarının veya snapshot’ların paylaşımı nedeniyle kesin boşalma tahmini değildir.
+0.3.0 npm ve Go önbelleklerini, desteklenen kapalı uygulamaların GPU/kod önbelleklerini ve kapalı simülatörlerin belirli cache/tmp klasörlerini kullanıcı onayıyla Çöp’e taşır. İncele öğeleri, paylaşılan sistem dyld önbelleği, kalıcı araç işlemleri, otomatik silme ve yerinde sıkıştırma bu işlem kapsamında değildir. Noter onayı, çevrimiçi güncelleme ve herkese açık dağıtım ayrı yayın adımlarıdır. Başlangıç diskindeki ölçülen alan APFS klonlarının veya snapshot’ların paylaşımı nedeniyle kesin boşalma tahmini değildir.
 
 ## Çalıştırma
 

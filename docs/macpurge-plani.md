@@ -1,6 +1,6 @@
 # MacPurge — ürün, tasarım ve geliştirme planı
 
-3 Kasım 2026 · Salt okunur 0.2.1 kontrol sürümü yerel incelemeye hazır. İlk yol haritası aşağıda korunuyor. Kullanıcı kontrol sürümünün salt okunur kalmasını seçti. Aşağıdaki gerçek dosya işlemleri ve kamuya açık yayın adımları bu teslimin dışındadır. [Kontrol kapsamı ve doğrulama kaydı](kontrol-surumu.md) · [Özellik envanteri](ozellik-envanteri.md) · [İlk teknik inceleme](referans-analizi.md)
+3 Kasım 2026 · 0.2.13 salt okunur kontrol noktası yerel Git geçmişinde korunur. 0.3.0, Alan planı üzerinden onaylı Çöp’e taşıma ve geri alma ekler. [Kontrol kapsamı ve doğrulama kaydı](kontrol-surumu.md) · [Özellik envanteri](ozellik-envanteri.md) · [İlk teknik inceleme](referans-analizi.md)
 
 **Ürün vaadi:** “Diskimde ne büyüdü, kime ait, neyi kaldırırsam ne kaybederim?” MacPurge bunu açıklayacak, önerilen işlemi önceden gösterecek ve sonucunu ölçecek. Geliştirici Mac’leri güçlü bir ilk kullanım alanı; teknik olmayan bir kullanıcı da komut bilmeden karar verebilmeli.
 

@@ -95,7 +95,7 @@ struct ControlSettings: View {
           }
         }
       }
-      Text("Bu sürüm ölçüm ve önizleme yapar.").font(.caption).foregroundStyle(.secondary)
+      Text("Alan planında seçtiğin önbellekleri inceleyip Çöp’e taşıyabilirsin.").font(.caption).foregroundStyle(.secondary)
     }.formStyle(.grouped).frame(width: 480, height: 520)
       .environment(\.locale, ReviewLanguage.locale(language))
       .onChange(of: language) { _, value in ReviewLanguage.apply(value) }

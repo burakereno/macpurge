@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		01C97E69F21013448EA805EB /* ExtendedInventory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28B1300CFE506476FA64920F /* ExtendedInventory.swift */; };
+		10453DAF74E429302AAFE4A7 /* CleanupViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30C89C54D1720F220486201 /* CleanupViews.swift */; };
 		124C320EFBD44A09B08F2244 /* MacPurgeWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 83FE3885B2D689467FEC0F7B /* MacPurgeWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		128164BDF747CCB0FF499216 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = D4509DAA2626D91BF69891D4 /* Localizable.strings */; };
 		1A69AAA78CA3B06BF752243A /* StorageScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1FA35076219E89E1E65E072 /* StorageScan.swift */; };
@@ -20,6 +21,7 @@
 		4649A4A373005B96100AD323 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C470571ED188582E270E08 /* WidgetSnapshot.swift */; };
 		517AD6A169723DDCE5DC2149 /* SimulatorDevices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F801EC7A6CADC347E69F604 /* SimulatorDevices.swift */; };
 		521FC7AF8F125D99DF0F6DC1 /* Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7909D233E729AF03DE0E36BC /* Demo.swift */; };
+		534D27DF7FD9549287588F79 /* TrashFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA734828E3EBBA4EB89A77E1 /* TrashFiles.swift */; };
 		53AAB6C044AE28B8A86FE164 /* PayloadVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = E93DBC2C004A0E41660E117E /* PayloadVerification.swift */; };
 		59F1B05E374424D59427CE70 /* ProjectAttribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01B489289313F81EAC3B6B5 /* ProjectAttribution.swift */; };
 		5E414F94A3EAE18C2EE26F31 /* CategoryLocations.swift in Sources */ = {isa = PBXBuildFile; fileRef = C81EF058513499F32A3D7E60 /* CategoryLocations.swift */; };
@@ -34,6 +36,7 @@
 		AE1812B9D6170DD76A1B90DC /* WorkspaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 342E6BBFA9CB6B68F0D21800 /* WorkspaceViews.swift */; };
 		AF67E40043FB2E41493E247B /* ExternalProjects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D2D6236758325AACFB931E1 /* ExternalProjects.swift */; };
 		B2F4CFFE47BB536E63CCCB31 /* LiveScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0ED45E3E81B4054C5AB9C4 /* LiveScan.swift */; };
+		BF9DD98AE3F7F769403EC13E /* CacheTrash.swift in Sources */ = {isa = PBXBuildFile; fileRef = F244222CDCB700A20A8502B9 /* CacheTrash.swift */; };
 		C187768AC6540D61FF928F80 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C470571ED188582E270E08 /* WidgetSnapshot.swift */; };
 		CA5106B5D7A359BDB65977BC /* MacPurgeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 765998B88B47307B5C4ED42C /* MacPurgeWidget.swift */; };
 		D115D8902DE4EF897A6109F4 /* Integrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446EEA5037E801E7DE5CC58C /* Integrations.swift */; };
@@ -92,9 +95,11 @@
 		9975B5DD28B45583326386B4 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		9BA4BBF253C542BF43D6E83C /* MeasurementCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCache.swift; sourceTree = "<group>"; };
 		B1FA35076219E89E1E65E072 /* StorageScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageScan.swift; sourceTree = "<group>"; };
+		B30C89C54D1720F220486201 /* CleanupViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupViews.swift; sourceTree = "<group>"; };
 		BC5CDEFA9ECAD29A10174D72 /* DirectoryIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryIndex.swift; sourceTree = "<group>"; };
 		C01B489289313F81EAC3B6B5 /* ProjectAttribution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectAttribution.swift; sourceTree = "<group>"; };
 		C81EF058513499F32A3D7E60 /* CategoryLocations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryLocations.swift; sourceTree = "<group>"; };
+		CA734828E3EBBA4EB89A77E1 /* TrashFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashFiles.swift; sourceTree = "<group>"; };
 		CDF88B2B9FB36A36619E5ED4 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		D38FCA09946BF104A8D91F7A /* ToolOwnership.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolOwnership.swift; sourceTree = "<group>"; };
 		DA6CF237ACEDAB20FF05E624 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -104,6 +109,7 @@
 		E6B6334A4BD032B81A5FBE02 /* LiveWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveWorkspace.swift; sourceTree = "<group>"; };
 		E93DBC2C004A0E41660E117E /* PayloadVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadVerification.swift; sourceTree = "<group>"; };
 		EA2479285C9A239A5ED7585A /* fr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fr; path = fr.lproj/Localizable.strings; sourceTree = "<group>"; };
+		F244222CDCB700A20A8502B9 /* CacheTrash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheTrash.swift; sourceTree = "<group>"; };
 		F725F12F5CABDC505812FDAA /* StorageSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageSafety.swift; sourceTree = "<group>"; };
 		FEB8B2073DADE067D248CC9B /* DiskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -120,7 +126,9 @@
 		33EA22656797EAD00349FB5C /* MacPurge */ = {
 			isa = PBXGroup;
 			children = (
+				F244222CDCB700A20A8502B9 /* CacheTrash.swift */,
 				C81EF058513499F32A3D7E60 /* CategoryLocations.swift */,
+				B30C89C54D1720F220486201 /* CleanupViews.swift */,
 				4DB99B09C4D5DD344869CA64 /* ControlSettings.swift */,
 				7909D233E729AF03DE0E36BC /* Demo.swift */,
 				4DF2064FC888EC1EB92B6893 /* Design.swift */,
@@ -140,6 +148,7 @@
 				3F6E8171F38D4346A63BDB9D /* StartupProbe.swift */,
 				4C7F88A9316E883611393FD5 /* StorageCategories.swift */,
 				D38FCA09946BF104A8D91F7A /* ToolOwnership.swift */,
+				CA734828E3EBBA4EB89A77E1 /* TrashFiles.swift */,
 				342E6BBFA9CB6B68F0D21800 /* WorkspaceViews.swift */,
 			);
 			name = MacPurge;
@@ -307,7 +316,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BF9DD98AE3F7F769403EC13E /* CacheTrash.swift in Sources */,
 				5E414F94A3EAE18C2EE26F31 /* CategoryLocations.swift in Sources */,
+				10453DAF74E429302AAFE4A7 /* CleanupViews.swift in Sources */,
 				D9CC6EAA7BF5B35B504E8EB6 /* ControlSettings.swift in Sources */,
 				521FC7AF8F125D99DF0F6DC1 /* Demo.swift in Sources */,
 				777C6BCB0EF6ED31F68DF839 /* Design.swift in Sources */,
@@ -332,6 +343,7 @@
 				7DBDB4C8DB28954506D09CCA /* StorageSafety.swift in Sources */,
 				1A69AAA78CA3B06BF752243A /* StorageScan.swift in Sources */,
 				AC55A37FAE06A6679A9F13E0 /* ToolOwnership.swift in Sources */,
+				534D27DF7FD9549287588F79 /* TrashFiles.swift in Sources */,
 				C187768AC6540D61FF928F80 /* WidgetSnapshot.swift in Sources */,
 				AE1812B9D6170DD76A1B90DC /* WorkspaceViews.swift in Sources */,
 			);
@@ -412,7 +424,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -433,7 +445,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.13;
+				MARKETING_VERSION = 0.3.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -500,7 +512,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -515,7 +527,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.13;
+				MARKETING_VERSION = 0.3.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

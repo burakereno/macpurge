@@ -31,7 +31,7 @@ struct LiveWorkspace: View {
             Label("Etkinlik", systemImage: "clock.arrow.circlepath").tag(LiveSection.activity)
           }
         }.listStyle(.sidebar)
-        Label("Salt okunur tarama", systemImage: "eye")
+        Label("Önizlemeli temizlik", systemImage: "checkmark.shield")
           .font(.callout.weight(.medium)).foregroundStyle(.secondary)
           .padding(.leading, 18).padding(.bottom, 19)
       }

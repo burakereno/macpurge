@@ -9,6 +9,7 @@ import WidgetKit
 enum ScanPhase: Equatable { case idle, running, cancelled, finished }
 
 @MainActor @Observable final class LiveScan {
+  let cleanup = CleanupSession()
   private static let preference = "liveScan.selectedProjectPaths"
   private let defaults: UserDefaults
   let recordsHistory: Bool
@@ -57,10 +58,12 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
   }
 
   func startDetailed() {
+    guard !cleanup.busy else { return }
     detailed = true
     start()
   }
   func startQuick() {
+    guard !cleanup.busy else { return }
     detailed = false
     start()
   }
@@ -86,6 +89,7 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
   }
 
   func start() {
+    guard !cleanup.busy else { return }
     let previous = work
     previous?.cancel()
     let token = UUID()
@@ -304,6 +308,7 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
   }
 
   func addProjects(_ urls: [URL]) {
+    guard !cleanup.busy else { return }
     // Store only outermost selected roots. An included subfolder is already measured.
     let candidates = Set((projects + urls).filter(\.isFileURL).map(\.path))
     let ordered = candidates.sorted { ($0.count, $0) < ($1.count, $1) }
@@ -320,6 +325,7 @@ enum ScanPhase: Equatable { case idle, running, cancelled, finished }
   }
 
   func exclude(_ url: URL) {
+    guard !cleanup.busy else { return }
     projects.removeAll { $0.path == url.path }
     selectionNote = nil
     saveSelectionAndScan()

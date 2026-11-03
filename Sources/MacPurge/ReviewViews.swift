@@ -380,11 +380,7 @@ struct SpacePreview: View {
             }.padding(12)
           }
         }
-        Note(
-          symbol: "eye",
-          text:
-            "Bu bir önizlemedir. Boyut, tek diskte ölçülen adayların tahminidir. Gerçek boş alandaki değişim 0 bayttır."
-        )
+        CleanupControls(scan: scan, choices: choices, reportID: report.id, selected: $selected)
       } else {
         ContentUnavailableView("Ölçüm bekleniyor", systemImage: "scope")
       }

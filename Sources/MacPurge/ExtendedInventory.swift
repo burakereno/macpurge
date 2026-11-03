@@ -201,10 +201,10 @@ enum ExtendedInventory {
       ("Node araç önbelleği", ".cache/node"), ("MongoDB imajları", ".cache/mongodb-binaries"),
       ("Antigravity eklentileri", ".antigravity-ide/extensions"), ("OrbStack", ".orbstack"),
     ] { add(.tools, name, path) }
-    for product in ["Slack", "discord", "Code", "Cursor"] {
-      for cache in ["GPUCache", "Code Cache"] {
+    for app in RenderCacheOwner.all {
+      for cache in RenderCacheOwner.leaves {
         add(
-          .apps, product + " · " + cache, "Library/Application Support/" + product + "/" + cache,
+          .apps, app.folder + " · " + cache, "Library/Application Support/" + app.folder + "/" + cache,
           .renderCache)
       }
     }

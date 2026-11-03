@@ -72,6 +72,7 @@ struct ScanReport: Identifiable, Codable, Sendable {
         }.joined()
         let eligible =
           assessment?.level == .safe && result.state == .complete && basis == "allocated"
+          && (profile != .simulatorCache || root.device != nil)
           && homeDevice != nil && homeDevice == result.measuredDevice
         items.append(
           .init(
