@@ -1,0 +1,50 @@
+name: MacPurge
+options:
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: tr
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.2.13"
+    CURRENT_PROJECT_VERSION: 15
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    GENERATE_INFOPLIST_FILE: YES
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+targets:
+  MacPurge:
+    type: application
+    platform: macOS
+    sources: [Sources/MacPurge, Sources/MacPurgeCore, Shared, Localization, Artwork/AppIcon.icns]
+    dependencies:
+      - target: MacPurgeWidget
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge.prototype
+        INFOPLIST_KEY_CFBundleIconFile: AppIcon
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        CODE_SIGN_ENTITLEMENTS: Packaging/app-entitlements.plist
+        OTHER_SWIFT_FLAGS: "$(inherited) -D MACPURGE_BUNDLE -package-name macpurge"
+  MacPurgeWidget:
+    type: app-extension
+    platform: macOS
+    sources: [Widget, Shared]
+    info:
+      path: Packaging/Widget-Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge.prototype.widget
+        CODE_SIGN_ENTITLEMENTS: Packaging/widget-entitlements.plist
+        SKIP_INSTALL: YES
+schemes:
+  MacPurge:
+    build:
+      targets:
+        MacPurge: all
