@@ -2,6 +2,10 @@ import CryptoKit
 import Darwin
 import Foundation
 
+#if SWIFT_PACKAGE
+  import MacPurgeCore
+#endif
+
 struct CleanupFailure: LocalizedError {
   let message: String
   init(_ message: String) { self.message = message }
@@ -42,7 +46,9 @@ enum TrashFiles {
 
   static func posix() -> POSIXError { POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
 
-  static func snapshot(_ url: URL, on device: Int32, allowSymlinks: Bool = false) throws
+  static func snapshot(
+    _ url: URL, on device: Int32, allowSymlinks: Bool = false, download: PackageDownloadCache? = nil
+  ) throws
     -> CacheSnapshot
   {
     try directory(url.deletingLastPathComponent(), enumerate: false) { parent, parentInfo in
@@ -54,7 +60,8 @@ enum TrashFiles {
         var links = [FileIdentity: Int]()
         var bytes: Int64 = 0
         try walk(
-          fd, device: device, depth: 0, allowSymlinks: allowSymlinks, hash: &hash, links: &links,
+          fd, device: device, depth: 0, allowSymlinks: allowSymlinks, download: download,
+          downloadPrefix: "", hash: &hash, links: &links,
           bytes: &bytes)
         guard links.values.allSatisfy({ $0 == 0 }) else {
           throw CleanupFailure("Klasör dışında bağlantısı olan dosya içeriyor.")
@@ -74,7 +81,8 @@ enum TrashFiles {
   }
 
   private static func walk(
-    _ fd: Int32, device: Int32, depth: Int, allowSymlinks: Bool, hash: inout SHA256,
+    _ fd: Int32, device: Int32, depth: Int, allowSymlinks: Bool, download: PackageDownloadCache?,
+    downloadPrefix: String, hash: inout SHA256,
     links: inout [FileIdentity: Int], bytes: inout Int64
   ) throws {
     guard depth < 160 else { throw CleanupFailure("Klasör çok derin.") }
@@ -113,6 +121,9 @@ enum TrashFiles {
       guard type == S_IFREG || type == S_IFDIR || (allowSymlinks && type == S_IFLNK) else {
         throw CleanupFailure("Bağlantı veya özel dosya içeriyor.")
       }
+      if let download, !download.accepts(name, directory: type == S_IFDIR, prefix: downloadPrefix) {
+        throw CleanupFailure("Yarım indirme veya tanınmayan içerik var. Bu klasör taşınamaz.")
+      }
       hash.update(data: Data(name.utf8))
       hash.update(data: Data([0]))
       hash.update(
@@ -138,7 +149,8 @@ enum TrashFiles {
           throw CleanupFailure("Klasör ölçülürken değişti.")
         }
         try walk(
-          child, device: device, depth: depth + 1, allowSymlinks: allowSymlinks, hash: &hash,
+          child, device: device, depth: depth + 1, allowSymlinks: allowSymlinks, download: download,
+          downloadPrefix: download == nil ? "" : downloadPrefix + name, hash: &hash,
           links: &links, bytes: &bytes)
       }
     }

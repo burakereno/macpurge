@@ -38,10 +38,16 @@ package struct ScanRoot: Identifiable, Hashable, Sendable {
   package let device: SimulatorDevice?
   package let runtimeUsage: RuntimeUsage?
   package let workspace: String?
+  package var downloadCache: PackageDownloadCache? = nil
+
+  package func effectiveProfile(_ size: RootSize?) -> StorageProfile {
+    size?.unexpectedDownloads == true ? .unrecognizedDownloads : profile
+  }
   package var excludedDirectories: Set<String> = []
   package let source: MeasurementSource
   package var displayTitle: String {
-    excludedDirectories.isEmpty ? title : "DerivedData · diğer içerik"
+    profile == .xcodeWorkspace && !excludedDirectories.isEmpty
+      ? "DerivedData · diğer içerik" : title
   }
   package var id: String {
     switch source {
@@ -69,10 +75,10 @@ package struct ScanRoot: Identifiable, Hashable, Sendable {
     let caches: [(String, String, StorageProfile)] = [
       ("npm", ".npm/_cacache", .npmCache),
       ("SwiftPM", "Library/Caches/org.swift.swiftpm", .sharedDependencies),
-      ("Homebrew", "Library/Caches/Homebrew", .packageDownloads),
+      ("Homebrew · diğer içerik", "Library/Caches/Homebrew", .packageDownloads),
       ("Yarn", "Library/Caches/Yarn", .packageDownloads),
       ("pnpm deposu", "Library/pnpm/store", .sharedDependencies),
-      ("pip", "Library/Caches/pip", .packageDownloads),
+      ("pip · diğer içerik", "Library/Caches/pip", .packageDownloads),
       ("uv", ".cache/uv", .uvCache), ("uv (Library)", "Library/Caches/uv", .uvCache),
       ("CocoaPods", "Library/Caches/CocoaPods", .packageDownloads),
       ("Gradle", ".gradle/caches", .sharedDependencies),
@@ -88,7 +94,23 @@ package struct ScanRoot: Identifiable, Hashable, Sendable {
         profile: .logs),
     ]
       + caches.map {
-        Self(group: .packages, title: $0.0, url: home.appending(path: $0.1), profile: $0.2)
+        title, path, profile in
+        var root = Self(
+          group: .packages, title: title, url: home.appending(path: path), profile: profile)
+        root.excludedDirectories = Set(
+          PackageDownloadCache.allCases.compactMap { cache in
+            let prefix = path + "/"
+            return cache.rawValue.hasPrefix(prefix)
+              ? String(cache.rawValue.dropFirst(prefix.count)) : nil
+          })
+        return root
+      }
+      + PackageDownloadCache.allCases.map { cache in
+        var root = Self(
+          group: .packages, title: cache.title, url: home.appending(path: cache.rawValue),
+          profile: .verifiedDownloads)
+        root.downloadCache = cache
+        return root
       }
       + projects.map {
         Self(group: .projects, title: $0.lastPathComponent, url: $0, profile: .project)
@@ -110,7 +132,14 @@ package enum ReadState: Equatable, Sendable {
   case unavailable(String)
 }
 
+package struct FileAgeBreakdown: Codable, Hashable, Sendable {
+  package var recent: Int64 = 0
+  package var older: Int64 = 0
+}
+
 package struct RootSize: Sendable {
+  package var age: FileAgeBreakdown?
+  package var unexpectedDownloads = false
   package var bytes: Int64 = 0
   package var modified: Date?
   package var sourceModified: Date?
@@ -145,7 +174,8 @@ package struct GroupSize {
 
   mutating func include(_ row: RootSize, for root: ScanRoot) throws {
     guard row.measured else { return }
-    let safeRoot = root.device == nil && root.profile.assessment(for: row.state)?.level == .safe
+    let safeRoot =
+      root.device == nil && root.effectiveProfile(row).assessment(for: row.state)?.level == .safe
     let splitDevice =
       root.device != nil && StorageProfile.simulatorCache.assessment(for: row.state)?.level == .safe
     var safe = safeRoot ? row.bytes : (splitDevice ? row.simulatorCacheBytes : 0)
@@ -208,7 +238,9 @@ package enum StorageMeter {
   }
 
   /// Only opens directories. File sizes come from metadata; file contents are never opened.
-  @concurrent package static func measure(_ root: ScanRoot) async throws -> RootSize {
+  @concurrent package static func measure(_ root: ScanRoot, at date: Date = .now) async throws
+    -> RootSize
+  {
     try Task.checkCancellation()
     switch root.source {
     case .allocation(let bytes): return RootSize(bytes: bytes)
@@ -256,7 +288,10 @@ package enum StorageMeter {
       close(fd)
       return RootSize(state: .unavailable("Klasör bilgisi okunamadı"))
     }
-    var walk = Walk(device: info.st_dev, project: root.group == .projects)
+    var walk = Walk(
+      device: info.st_dev, project: root.group == .projects, download: root.downloadCache,
+      ageCutoff: root.group == .temp ? date.addingTimeInterval(-72 * 3600) : nil)
+    if root.group == .temp { walk.result.age = FileAgeBreakdown() }
     walk.result.measuredInode = info.st_ino
     walk.result.measuredDevice = info.st_dev
     let output =
@@ -282,6 +317,8 @@ package enum StorageMeter {
   private struct Walk {
     let device: dev_t
     let project: Bool
+    let download: PackageDownloadCache?
+    let ageCutoff: Date?
     var result = RootSize()
     var outputLinks = Set<FileKey>()
     var cacheLinks: [FileKey: (seen: Int, expected: Int)] = [:]
@@ -289,7 +326,7 @@ package enum StorageMeter {
     /// Takes ownership of fd, even if enumeration fails or is cancelled.
     mutating func visit(
       _ fd: Int32, level: Int, branch: String, output: String?, sourceTree: Bool,
-      scope: SimulatorDirectory, exclusions: [ArraySlice<Substring>]
+      scope: SimulatorDirectory, exclusions: [ArraySlice<Substring>], downloadPrefix: String = ""
     ) throws {
       guard let dir = fdopendir(fd) else {
         close(fd)
@@ -315,13 +352,22 @@ package enum StorageMeter {
               result.missed += 1
               return
             }
+            if let download, !result.unexpectedDownloads {
+              let regular = info.st_mode & S_IFMT == S_IFREG
+              let directory = info.st_mode & S_IFMT == S_IFDIR
+              result.unexpectedDownloads =
+                info.st_dev != device || info.st_uid != getuid() || !(regular || directory)
+                || !download.accepts(
+                  String(cString: name), directory: directory, prefix: downloadPrefix)
+            }
             guard info.st_dev == device else { return }
             let type = info.st_mode & S_IFMT
             guard type == S_IFDIR || type == S_IFREG else { return }
             let needsName =
               level == 0
               || (type == S_IFDIR
-                && ((project && output == nil) || scope.checksChildName || !exclusions.isEmpty))
+                && ((project && output == nil) || scope.checksChildName || !exclusions.isEmpty
+                  || download != nil))
             let childName = needsName ? String(cString: name) : ""
             let bucket = level == 0 ? (type == S_IFDIR ? childName : "Kök dosyaları") : branch
             if type == S_IFDIR {
@@ -351,7 +397,9 @@ package enum StorageMeter {
                 output: output
                   ?? (project && StorageMeter.outputFolders.contains(childName) ? childName : nil),
                 sourceTree: sourceTree && childName != ".git",
-                scope: scope.descending(into: childName), exclusions: nested)
+                scope: scope.descending(into: childName), exclusions: nested,
+                downloadPrefix: download == nil || result.unexpectedDownloads
+                  ? "" : downloadPrefix + childName)
               return
             }
             let bytes = max(0, Int64(info.st_blocks)) * 512
@@ -382,6 +430,15 @@ package enum StorageMeter {
               if let output {
                 result.outputBytes += bytes
                 result.outputKinds[output, default: 0] += bytes
+              }
+            }
+            if let ageCutoff {
+              let timestamp =
+                Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1e9
+              if timestamp >= ageCutoff.timeIntervalSince1970 {
+                result.age?.recent += bytes
+              } else {
+                result.age?.older += bytes
               }
             }
             result.files += 1

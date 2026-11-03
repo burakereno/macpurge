@@ -9,7 +9,11 @@ struct StorageSafetyTests {
         let project = home.appending(path: "Projects/go-build")
         let roots = ScanRoot.catalog(home: home, projects: [project])
         let safePaths = roots.filter { $0.profile.assessment(for: .complete)?.level == .safe }.map(\.url.path)
-        #expect(Set(safePaths) == ["/fixture/.npm/_cacache", "/fixture/Library/Caches/go-build"])
+        #expect(Set(safePaths) == [
+            "/fixture/.npm/_cacache", "/fixture/Library/Caches/go-build",
+            "/fixture/Library/Caches/pip/http", "/fixture/Library/Caches/pip/http-v2",
+            "/fixture/Library/Caches/Homebrew/downloads",
+        ])
         let projectRoot = try #require(roots.first { $0.group == .projects })
         #expect(projectRoot.profile.assessment(for: .complete)?.level == .review)
         #expect(StorageProfile.unknown.assessment(for: .complete)?.level == .review)

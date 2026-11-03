@@ -1,6 +1,12 @@
-# MacPurge 0.5.0 kontrol sürümü
+# MacPurge 0.6.0 kontrol sürümü
 
 3 Kasım 2026. Taramalar salt okunurdur. Alan planındaki **Çöp’e taşımayı incele…** düğmesi, desteklenen Güvenli önbellekleri ve Xcode ara çıktılarını taşımadan önce her klasörün tam yolunu gösterir. Yerel geri alma kayıtları uygulama kapatılıp açıldığında da kullanılabilir.
+
+## 0.6.0’da deneme
+
+- **Depolama → Paket yöneticileri:** pip’in standart HTTP indirme önbellekleri ve Homebrew’un tamamlanmış indirmeleri ayrı satırlarda görünür. Yarım indirme, beklenmeyen içerik veya çalışan paket yöneticisi taşımayı engeller. Yerel wheel’lar ve diğer içerikler İncele olarak kalır. Desteklenen satırları Alan planı’nda önizleyip Çöp’e taşıyabilir ve geri alabilirsin.
+- **Depolama → Geçici dosyalar:** Ayrıntılı tarama, her konumda son 72 saatte değişen dosyaları ve daha eskilerini diskte ayrılan bayta göre gösterir. Kısmi ölçümde iki rakam da alt sınırdır. Bu kategori yalnızca ölçülür.
+- **Etkinlik → Son 7 günde büyüyen kategoriler:** Son tarama günü ve önceki altı takvim gününde, aynı kapsamdaki her günün son taraması karşılaştırılır. İki günde de tam ölçülen kategoriler net artışa göre sıralanır. Daha önce ölçülmeyen bir klasörün boyutu “İlk ölçüm” olarak gösterilir.
 
 ## 0.5.0’da deneme
 
@@ -37,6 +43,9 @@
 | Yerel dağıtım | Xcode projesi, imzalı app, imzalı widget uzantısı ve yerel kurulum DMG’si. Paket denetimi, uygulama kimliğini, geliştirici takımını, Developer ID imzasını ve içeriğin bütünlüğünü doğrular. |
 
 ## Doğrulama kaydı
+
+- 0.6.0’ın Release testinde 100.000 dosyalık tarama dahil 33 test geçti. İzole bir kullanıcı klasöründe uygulama, iki indirme klasörünün tam yollarını önizlemede gösterdi. 1,6 MB test verisi Çöp’e taşındı ve iki klasör de arayüzden geri alındı. Diğer pip ve Homebrew dosyaları yerlerinde kaldı.
+- Örnek geçmişle 1–3 Kasım arasındaki iki ölçüm gününde paket kategorisinin artışı ve pip’in katkısı arayüzde doğrulandı. Ayrıca 72 saat sınırındaki dosya, sabit bağlantılar, eksik geçmiş, farklı kapsamlar ve tek güne sıkışan 40 tarama test edildi.
 
 - 0.2.3’te kategori çubukları ham öğe toplamı yerine ölçüm sırasında tekilleştirilen boyutları kullanır. Hem Güvenli hem İncele öğesinde bulunan bir dosya aynı kategoride yalnızca İncele’ye yazılır. Kısmi ölçümde yalnızca okunabilen bölüm gösterilir; ölçülemeyen kategoriye sıfır boyut atanmaz.
 - 0.2.2’de Depolama’da AI modelleri ve araçları, Android, uygulama verileri ve önbellekleri, geliştirici aracı verileri, simülatör cihazları, Xcode, simülatör runtime’ları, paket yöneticileri, diğer büyük klasörler, sistem, geçici dosyalar, günlükler ve tanılama ayrı ayrı görülebilir. Diğer mevcut kategoriler de listede kalır. Ölçüm tamamlandıkça kategori açılır; **≥** ölçülen alt sınırdır. Runtime boyutları CoreSimulator’ın bildirdiği imaj boyutlarıdır. Geçici dosyalar son kullanım yaşı ayrımı olmadan ölçülür. Ölçülen boyut boşaltılabilecek alan anlamına gelmez.

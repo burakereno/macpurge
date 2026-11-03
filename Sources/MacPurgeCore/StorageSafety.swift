@@ -13,7 +13,7 @@ package struct SafetyAssessment: Equatable, Sendable {
 package enum StorageProfile: Sendable {
   case npmCache, goBuildCache, xcodeWorkspace, packageDownloads, sharedDependencies, uvCache,
     project, unknown
-  case simulatorCache, simulatorData, xcodeIntermediate
+  case simulatorCache, simulatorData, xcodeIntermediate, verifiedDownloads, unrecognizedDownloads
   case logs, personal, systemManaged, renderCache
 
   package func assessment(for state: ReadState?) -> SafetyAssessment? {
@@ -27,6 +27,15 @@ package enum StorageProfile: Sendable {
     }
 
     switch self {
+    case .verifiedDownloads:
+      return .init(
+        level: .safe,
+        reason:
+          "Araç bu indirmeleri yeniden alabilir. Çevrimdışı kurulum için önbelleğe ihtiyaç duyabilirsin."
+      )
+    case .unrecognizedDownloads:
+      return .init(
+        level: .review, reason: "Yarım indirme veya tanınmayan içerik var. Bu klasör taşınamaz.")
     case .npmCache:
       return .init(
         level: .safe,

@@ -333,7 +333,8 @@ private struct ScanGroupView: View {
   private var counts: [SafetyLevel: Int] {
     let levels = roots.flatMap { root in
       let profiles: [StorageProfile] =
-        root.device == nil ? [root.profile] : [.simulatorCache, .simulatorData]
+        root.device == nil
+        ? [root.effectiveProfile(scan.results[root.id])] : [.simulatorCache, .simulatorData]
       return profiles.compactMap { $0.assessment(for: scan.results[root.id]?.state)?.level }
     }
     return levels.reduce(into: [:]) { $0[$1, default: 0] += 1 }
@@ -491,7 +492,7 @@ private struct MeasuredRoot: View {
   @State private var expanded = false
 
   var result: RootSize? { scan.results[root.id] }
-  var assessment: SafetyAssessment? { root.profile.assessment(for: result?.state) }
+  var assessment: SafetyAssessment? { root.effectiveProfile(result).assessment(for: result?.state) }
   var amount: String {
     guard let result else { return scan.activeRoot == root ? "Ölçülüyor…" : "Ölçülmedi" }
     switch result.state {
@@ -508,6 +509,7 @@ private struct MeasuredRoot: View {
         if let usage = root.runtimeUsage {
           RuntimeDetails(usage: usage)
         } else if let result, result.measured {
+          if let age = result.age { FileAgeView(age: age, partial: result.state == .partial) }
           Text("\(result.files) dosya ölçüldü").font(.caption)
           if root.group == .projects {
             Text(

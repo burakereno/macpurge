@@ -23,6 +23,7 @@ struct ReportItem: Identifiable, Codable, Hashable, Sendable {
   var workspace: String? = nil
   var runtimeUsage: RuntimeUsage? = nil
   var directoryInode: UInt64? = nil
+  var age: FileAgeBreakdown? = nil
 
   var complete: Bool { status == "complete" }
   var estimated: Bool { basis == "tool" }
@@ -116,7 +117,7 @@ struct ScanReport: Identifiable, Codable, Sendable {
             eligibleBytes: eligible ? max(0, candidate) : 0,
             modified: result.modified, parts: parts, volume: result.measuredDevice,
             workspace: root.workspace, runtimeUsage: root.runtimeUsage,
-            directoryInode: result.measuredInode))
+            directoryInode: result.measuredInode, age: result.measured ? result.age : nil))
       }
       let parts = Dictionary(
         uniqueKeysWithValues: result.largest.sorted { a, b in
@@ -131,10 +132,12 @@ struct ScanReport: Identifiable, Codable, Sendable {
           candidate: result.simulatorCacheBytes, profile: .simulatorCache, parts: [:])
       } else {
         append(
-          name: root.excludedDirectories.isEmpty
-            ? root.title : ReviewLanguage.text(root.displayTitle), suffix: "",
+          name: root.excludedDirectories.isEmpty && root.downloadCache == nil
+            ? root.title : ReviewLanguage.text(root.displayTitle),
+          suffix: root.group == .packages && !root.excludedDirectories.isEmpty ? "/remainder" : "",
           bytes: result.measured ? result.bytes : nil,
-          candidate: result.bytes - result.sharedLinkBytes, profile: root.profile, parts: parts)
+          candidate: result.bytes - result.sharedLinkBytes, profile: root.effectiveProfile(result),
+          parts: parts)
       }
     }
     return .init(
@@ -193,6 +196,7 @@ struct ScanReport: Identifiable, Codable, Sendable {
       let id, name, group, status, measurement: String
       let bytes: Int64?
       let safety, path: String?
+      let age: FileAgeBreakdown?
     }
     struct Payload: Encodable {
       let schemaVersion: Int
@@ -210,7 +214,7 @@ struct ScanReport: Identifiable, Codable, Sendable {
         items: items.map {
           Row(
             id: $0.id, name: $0.name, group: $0.category, status: $0.status, measurement: $0.basis,
-            bytes: $0.bytes, safety: $0.safety, path: includePaths ? $0.path : nil)
+            bytes: $0.bytes, safety: $0.safety, path: includePaths ? $0.path : nil, age: $0.age)
         }))
   }
 }
@@ -276,6 +280,49 @@ struct ScanArchive: Sendable {
       }
       return rows
     } ?? []
+  }
+
+  func weeklyGrowth(ending report: ScanReport, calendar: Calendar = .current) throws -> WeeklyGrowth
+  {
+    let today = calendar.startOfDay(for: report.date)
+    guard let scope = report.scope else { return WeeklyGrowth(current: report, earlierDays: []) }
+    let snapshots: [ScanReport] =
+      try connection(write: false) { db in
+        var query: OpaquePointer?
+        let sql = """
+          SELECT payload FROM scans WHERE t >= ? AND t < ?
+          AND json_extract(CAST(payload AS TEXT),'$.scope') = ?
+          AND json_extract(CAST(payload AS TEXT),'$.extended') = ?
+          ORDER BY t DESC LIMIT 1
+          """
+        guard sqlite3_prepare_v2(db, sql, -1, &query, nil) == SQLITE_OK else {
+          throw Failure(errorDescription: "Haftalık ölçümler okunamadı.")
+        }
+        defer { sqlite3_finalize(query) }
+        sqlite3_bind_text(query, 3, scope, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int(query, 4, report.extended ? 1 : 0)
+        var rows: [ScanReport] = []
+        for day in -6..<0 {
+          try Task.checkCancellation()
+          guard let start = calendar.date(byAdding: .day, value: day, to: today),
+            let end = calendar.date(byAdding: .day, value: 1, to: start)
+          else { continue }
+          sqlite3_reset(query)
+          sqlite3_bind_double(query, 1, start.timeIntervalSince1970)
+          sqlite3_bind_double(query, 2, end.timeIntervalSince1970)
+          let status = sqlite3_step(query)
+          if status == SQLITE_DONE { continue }
+          guard status == SQLITE_ROW, let ptr = sqlite3_column_blob(query, 0) else {
+            throw Failure(errorDescription: "Haftalık ölçümler okunamadı.")
+          }
+          rows.append(
+            try JSONDecoder().decode(
+              ScanReport.self,
+              from: Data(bytes: ptr, count: Int(sqlite3_column_bytes(query, 0)))))
+        }
+        return rows
+      } ?? []
+    return WeeklyGrowth(current: report, earlierDays: snapshots)
   }
 
   func save(_ report: ScanReport) throws {
@@ -417,6 +464,9 @@ struct ScanArchive: Sendable {
 actor HistoryIO {
   static let shared = HistoryIO()
   func load() throws -> [ScanReport] { try ScanArchive.standard.read(limit: 35) }
+  func weeklyGrowth(ending report: ScanReport) throws -> WeeklyGrowth {
+    try ScanArchive.standard.weeklyGrowth(ending: report)
+  }
   func record(_ report: ScanReport) throws { try ScanArchive.standard.save(report) }
   func remember(_ folders: [MovedFolder]) throws { try ScanArchive.standard.remember(folders) }
   func movedFolders() throws -> [MovedFolder] { try ScanArchive.standard.movedFolders() }

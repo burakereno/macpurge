@@ -85,6 +85,9 @@ struct StorageBrowser: View {
   @State private var sorting: [KeyPathComparator<ReportItem>] = [
     .init(\.numericSize, order: .reverse)
   ]
+  @State private var ageSorting: [KeyPathComparator<ReportItem>] = [
+    .init(\.numericSize, order: .reverse)
+  ]
   @State private var inspecting = false
   private var report: ScanReport? {
     scan.phase == .running && scan.detailed ? scan.storagePreview : scan.report
@@ -106,7 +109,8 @@ struct StorageBrowser: View {
   }
 
   private var visible: [ReportItem] {
-    (report?.items ?? []).filter(matchesFilters).sorted(using: sorting)
+    (report?.items ?? []).filter(matchesFilters).sorted(
+      using: category == .temp ? ageSorting : sorting)
   }
 
   private var outsideFilter: Int {
@@ -119,9 +123,11 @@ struct StorageBrowser: View {
       VStack(alignment: .leading, spacing: 12) {
         PageTitle(
           kicker: "Çalışma alanı", title: "Depolama",
-          subtitle: listing
-            ? "Ölçülen öğeleri incele ve alan hedefin için adayları karşılaştır."
-            : "Çubuklar en büyük kategoriye göre ölçeklenir. Renkler ölçülen alanın dağılımını gösterir."
+          subtitle: category == .temp
+            ? "Dosyalar son değişiklik zamanına göre ayrılır. Eksik ölçümler alt sınır olarak gösterilir."
+            : listing
+              ? "Ölçülen öğeleri incele ve alan hedefin için adayları karşılaştır."
+              : "Çubuklar en büyük kategoriye göre ölçeklenir. Renkler ölçülen alanın dağılımını gösterir."
         )
         HStack {
           if listing {
@@ -232,7 +238,7 @@ struct StorageBrowser: View {
     }.labelsHidden().frame(idealWidth: 180, maxWidth: 180)
   }
 
-  private var storageTable: some View {
+  private var itemTable: some View {
     let changes = Dictionary(
       uniqueKeysWithValues: (report?.growth(since: previous) ?? []).map { ($0.0.id, $0.1) })
     return Table(visible, selection: $focus, sortOrder: $sorting) {
@@ -278,6 +284,36 @@ struct StorageBrowser: View {
         }
       }.width(min: 100, ideal: 148, max: 210)
     }
+  }
+
+  private var ageTable: some View {
+    Table(visible, selection: $focus, sortOrder: $ageSorting) {
+      TableColumn("Öğe", value: \.name) { row in Text(row.name).lineLimit(1) }
+      TableColumn("Etiket") { row in
+        if let label = row.safety, let level = SafetyLevel(rawValue: label) {
+          SafetyBadge(level: level)
+        } else {
+          Text("—").foregroundStyle(.secondary)
+        }
+      }.width(min: 65, ideal: 80, max: 105)
+      TableColumn("Boyut", value: \.numericSize) { row in ageValue(row.bytes, row) }
+        .width(min: 64, ideal: 85, max: 112)
+      TableColumn("Son 72 saat", value: \.recentSize) { row in ageValue(row.age?.recent, row) }
+        .width(min: 68, ideal: 96, max: 124)
+      TableColumn("72 saatten eski", value: \.olderSize) { row in ageValue(row.age?.older, row) }
+        .width(min: 78, ideal: 104, max: 130)
+    }
+  }
+
+  private func ageValue(_ bytes: Int64?, _ row: ReportItem) -> some View {
+    Text(bytes.map { (row.complete ? "" : "≥ ") + byteLabel($0) } ?? "—")
+      .monospacedDigit().frame(maxWidth: .infinity, alignment: .trailing)
+  }
+
+  private var storageTable: some View {
+    Group {
+      if category == .temp { ageTable } else { itemTable }
+    }
     .contextMenu(forSelectionType: String.self) { ids in
       Button("Ayrıntıları göster") {
         if let id = ids.first {
@@ -315,6 +351,8 @@ struct StorageBrowser: View {
 
 extension ReportItem {
   fileprivate var numericSize: Int64 { bytes ?? -1 }
+  fileprivate var recentSize: Int64 { age?.recent ?? -1 }
+  fileprivate var olderSize: Int64 { age?.older ?? -1 }
   fileprivate var sortDate: Date { modified ?? .distantPast }
 }
 
@@ -448,6 +486,7 @@ struct ItemInspector: View {
       }
       Text(ReviewLanguage.text(item.reason)).fixedSize(horizontal: false, vertical: true)
       if case .blocked(let reason) = moveState { LabeledContent("Plan", value: reason) }
+      if let age = item.age { FileAgeView(age: age, partial: !item.complete) }
       if let usage = item.runtimeUsage {
         RuntimeDetails(usage: usage, compact: true)
       }
@@ -605,6 +644,7 @@ struct ScanActivity: View {
             }
           }.chartYAxisLabel("GB").frame(height: 145)
         }
+        WeeklyGrowthView(report: current)
         let unusual = current.unusualGroups(previous: scan.history)
         if !unusual.isEmpty {
           SectionHead(title: "Olağandışı artışlar")

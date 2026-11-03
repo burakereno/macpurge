@@ -32,7 +32,8 @@ package actor MeasurementCache {
   }
 
   package func ticket(_ root: ScanRoot) -> Ticket? {
-    guard paths.contains(root.url.path) else { return nil }
+    // Age buckets change with time even when no files change.
+    guard root.group != .temp, paths.contains(root.url.path) else { return nil }
     let fd = open(root.url.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
     guard fd >= 0 else { return nil }
     defer { close(fd) }

@@ -72,26 +72,36 @@ actor CacheTrash {
   let journal: URL
   private let simulatorStates: @Sendable () async throws -> [UUID: String]
   private let xcodeIdle: @Sendable () async throws -> Bool
+  private let packageIdle: @Sendable (PackageDownloadCache) async throws -> Bool
   private let trash: URL
 
   init(
     home: URL, journal: URL, trash: URL? = nil,
     simulatorStates: @escaping @Sendable () async throws -> [UUID: String] = CacheTrash
       .simulatorStates,
-    xcodeIdle: @escaping @Sendable () async throws -> Bool = CacheTrash.xcodeIdle
+    xcodeIdle: @escaping @Sendable () async throws -> Bool = CacheTrash.xcodeIdle,
+    packageIdle: @escaping @Sendable (PackageDownloadCache) async throws -> Bool = CacheTrash
+      .packageIdle
   ) {
     self.home = home
     self.journal = journal
     self.trash = trash ?? home.appending(path: ".Trash")
     self.simulatorStates = simulatorStates
     self.xcodeIdle = xcodeIdle
+    self.packageIdle = packageIdle
   }
 
   private enum Owner: Equatable {
     case package
+    case download(PackageDownloadCache)
     case xcode
     case application(String)
     case simulator(UUID)
+
+    var downloadCache: PackageDownloadCache? {
+      if case .download(let cache) = self { return cache }
+      return nil
+    }
   }
 
   private func parts(_ path: URL) -> [String]? {
@@ -111,6 +121,9 @@ actor CacheTrash {
   private func owner(_ path: URL) -> Owner? {
     guard let p = parts(path) else { return nil }
     if p == [".npm", "_cacache"] || p == ["Library", "Caches", "go-build"] { return .package }
+    if let cache = PackageDownloadCache(rawValue: p.joined(separator: "/")) {
+      return .download(cache)
+    }
     if p.count == 4, p[0] == "Library", p[1] == "Application Support",
       RenderCacheOwner.leaves.contains(p[3]),
       let app = RenderCacheOwner.all.first(where: { $0.folder == p[2] })
@@ -159,6 +172,17 @@ actor CacheTrash {
       }
   }
 
+  static func packageIdle(_ cache: PackageDownloadCache) async throws -> Bool {
+    let data = try await InventoryCommand.output("/bin/ps", ["-axww", "-o", "args="])
+    let commands = String(decoding: data, as: UTF8.self).split(separator: "\n")
+    let pattern =
+      cache == .brew
+      ? #"(?:^|[ /])(?:brew|brew\.rb|brew\.sh)(?:\s|$)"#
+      : #"(?:^|[ /])pip(?:[0-9]+(?:\.[0-9]+)*)?(?:\s|$)"#
+    return !commands.isEmpty
+      && !commands.contains { $0.range(of: pattern, options: .regularExpression) != nil }
+  }
+
   private func verifyWorkspace(_ path: URL, expected: String?) throws {
     let derived = path.deletingLastPathComponent().deletingLastPathComponent()
     guard let expected,
@@ -170,6 +194,10 @@ actor CacheTrash {
   private func verifyIdle(_ owner: Owner, states: [UUID: String]? = nil) async throws {
     switch owner {
     case .package: break
+    case .download(let cache):
+      guard try await packageIdle(cache) else {
+        throw CleanupFailure("Paket yöneticisinin işlemi bitince yeniden dene.")
+      }
     case .xcode:
       guard try await xcodeIdle() else {
         throw CleanupFailure("Xcode’u kapat ve derlemenin bitmesini bekle.")
@@ -199,7 +227,7 @@ actor CacheTrash {
     else { throw CleanupFailure("Tam ölçülmüş bir Güvenli öğe değil.") }
     if let owner = owner(root) {
       switch (owner, ScanGroup(rawValue: row.category)) {
-      case (.package, .packages), (.application, .apps): break
+      case (.package, .packages), (.download, .packages), (.application, .apps): break
       case (.xcode, .xcode):
         guard let workspace = row.workspace,
           ProjectAttribution.owningRoot(workspace: workspace, selected: projects) != nil
@@ -243,7 +271,8 @@ actor CacheTrash {
         !projects.contains(where: { $0.path == path.path || $0.path.hasPrefix(path.path + "/") })
       else { throw CleanupFailure("Seçili proje klasörünü içeriyor.") }
       do {
-        let stamp = try TrashFiles.snapshot(path, on: device, allowSymlinks: owner == .xcode)
+        let stamp = try TrashFiles.snapshot(
+          path, on: device, allowSymlinks: owner == .xcode, download: owner.downloadCache)
         if stamp.bytes > 0 {
           targets.append(
             .init(
@@ -342,11 +371,12 @@ actor CacheTrash {
       do {
         guard let owner = owner(target.path) else { throw CleanupFailure("Hedef desteklenmiyor.") }
         let stamp = try TrashFiles.snapshot(
-          target.path, on: target.snapshot.identity.device, allowSymlinks: owner == .xcode)
+          target.path, on: target.snapshot.identity.device, allowSymlinks: owner == .xcode,
+          download: owner.downloadCache)
         guard stamp == target.snapshot else {
           throw CleanupFailure("Önizlemeden sonra değişti. Yeniden ölç.")
         }
-        if owner == .xcode || idle?.owner != owner
+        if owner == .xcode || owner.downloadCache != nil || idle?.owner != owner
           || (idle?.time.duration(to: .now) ?? .seconds(2)) > .seconds(1)
         {
           try await verifyIdle(owner)
@@ -379,7 +409,8 @@ actor CacheTrash {
           owner != .xcode || (try? verifyWorkspace(target.path, expected: target.workspace)) != nil
         if !sameProject
           || (try? TrashFiles.snapshot(
-            destination, on: r.identity.device, allowSymlinks: owner == .xcode))?.digest
+            destination, on: r.identity.device, allowSymlinks: owner == .xcode,
+            download: owner.downloadCache))?.digest
             != stamp.digest
         {
           do {
