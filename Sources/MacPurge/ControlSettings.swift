@@ -26,7 +26,7 @@ struct ControlSettings: View {
         Toggle("Show in menu bar", isOn: locationToggle(.menuBar))
         Toggle("Girişte aç", isOn: Binding(
           get: { loginStatus == .enabled || loginStatus == .requiresApproval },
-          set: updateLogin
+          set: { updateLogin($0) }
         ))
         .disabled(changingLogin)
         if loginStatus == .requiresApproval {
