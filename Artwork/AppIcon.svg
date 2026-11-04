@@ -1,8 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="2048" height="2048" viewBox="0 0 1024 1024">
- <defs>
-  <linearGradient id="base" x2=".8" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#20574f"/><stop offset="1" stop-color="#08282c"/></linearGradient>
- </defs>
- <rect x="83" y="90" width="858" height="858" rx="198" fill="#183432" opacity=".22"/>
- <rect x="86" y="78" width="852" height="852" rx="195" fill="url(#base)" stroke="#2e635d" stroke-width="5"/>
- <image x="120" y="95" width="784" height="784" xlink:href="AppIcon-Foreground.png"/>
+ <defs><clipPath id="icon"><rect x="84" y="84" width="856" height="856" rx="195"/></clipPath></defs>
+ <image x="84" y="84" width="856" height="856" clip-path="url(#icon)" xlink:href="AppIcon-Source.png"/>
 </svg>

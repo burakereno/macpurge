@@ -290,3 +290,8 @@
 "Diğer kullanım" = "기타 사용량";
 "Güvenli alan tarama ve kontroller tamamlandığında gösterilir." = "스캔과 확인이 완료되면 안전하게 정리할 수 있는 공간이 표시됩니다.";
 "Temizlemeden önce dosyaları ve etkilerini incele." = "정리하기 전에 파일과 영향을 확인하세요.";
+
+/* Sidebar update action and icon visibility */
+"Update Available" = "업데이트 사용 가능";
+"Open update settings" = "업데이트 설정 열기";
+"Keep at least one icon visible in the Dock or menu bar." = "Dock 또는 메뉴 막대에 하나 이상의 아이콘을 표시해야 합니다.";

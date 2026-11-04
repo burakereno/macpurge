@@ -306,7 +306,7 @@ enum ScanProgressStage {
         date: date, free: snapshot.free,
         candidates: snapshot.items.reduce(0) { $0 + $1.eligibleBytes })
       try JSONEncoder().encode(brief).write(to: url, options: .atomic)
-      WidgetCenter.shared.reloadTimelines(ofKind: "MacPurge.Disk")
+      WidgetCenter.shared.reloadTimelines(ofKind: BuildIdentity.widgetKind)
     }
   #endif
   func forgetRegrowth(at path: String) async throws {
@@ -328,7 +328,7 @@ enum ScanProgressStage {
         if let url = WidgetSnapshot.location, FileManager.default.fileExists(atPath: url.path) {
           do {
             try FileManager.default.removeItem(at: url)
-            WidgetCenter.shared.reloadTimelines(ofKind: "MacPurge.Disk")
+            WidgetCenter.shared.reloadTimelines(ofKind: BuildIdentity.widgetKind)
           } catch { historyError = error.localizedDescription }
         }
       #endif

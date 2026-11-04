@@ -342,7 +342,7 @@ actor ScanReportBuilder {
 struct ScanArchive: Sendable {
   let file: URL
   static let standard = Self(
-    file: URL.applicationSupportDirectory.appending(path: "MacPurge/History.sqlite"))
+    file: BuildIdentity.supportDirectory.appending(path: "History.sqlite"))
   struct Failure: LocalizedError {
     let errorDescription: String?
     init(errorDescription: String) { self.errorDescription = ReviewLanguage.text(errorDescription) }

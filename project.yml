@@ -1,4 +1,8 @@
 name: MacPurge
+configs:
+  Debug: debug
+  Development: debug
+  Release: release
 options:
   deploymentTarget:
     macOS: "14.0"
@@ -7,35 +11,63 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
-    MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: 19
+    MARKETING_VERSION: "0.6.1"
+    CURRENT_PROJECT_VERSION: 26
     ENABLE_HARDENED_RUNTIME: YES
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
     GENERATE_INFOPLIST_FILE: YES
     MACOSX_DEPLOYMENT_TARGET: "14.0"
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG MACPURGE_DEVELOPMENT"
+    Development:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG MACPURGE_DEVELOPMENT"
 targets:
   MacPurge:
     type: application
     platform: macOS
-    sources: [Sources/MacPurge, Sources/MacPurgeCore, Shared, Localization, Artwork/AppIcon.icns]
+    sources: [Sources/MacPurge, Sources/MacPurgeCore, Shared, Localization, Artwork/AppIcon.icns, Artwork/AppIcon-Dev.icns]
+    info:
+      path: Packaging/App-Info.plist
+      properties:
+        CFBundleIconFile: "$(MACPURGE_ICON_FILE)"
+        CFBundleDisplayName: "$(PRODUCT_NAME)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
     dependencies:
       - target: MacPurgeWidget
         embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge
+        MACPURGE_ICON_FILE: AppIcon.icns
         INFOPLIST_KEY_CFBundleIconFile: AppIcon.icns
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
         CODE_SIGN_ENTITLEMENTS: Packaging/app-entitlements.plist
         OTHER_SWIFT_FLAGS: "$(inherited) -D MACPURGE_BUNDLE -package-name macpurge"
+      configs:
+        Debug:
+          PRODUCT_NAME: MacPurge Dev
+          EXECUTABLE_NAME: MacPurge
+          PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge.dev
+          MACPURGE_ICON_FILE: AppIcon-Dev.icns
+          CODE_SIGN_ENTITLEMENTS: Packaging/dev-app-entitlements.plist
+        Development:
+          PRODUCT_NAME: MacPurge Dev
+          EXECUTABLE_NAME: MacPurge
+          PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge.dev
+          MACPURGE_ICON_FILE: AppIcon-Dev.icns
+          CODE_SIGN_ENTITLEMENTS: Packaging/dev-app-entitlements.plist
   MacPurgeWidget:
     type: app-extension
     platform: macOS
-    sources: [Widget, Shared]
+    sources: [Widget, Shared, Sources/MacPurge/BuildIdentity.swift]
     info:
       path: Packaging/Widget-Info.plist
       properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
@@ -43,8 +75,21 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge.widget
         CODE_SIGN_ENTITLEMENTS: Packaging/widget-entitlements.plist
         SKIP_INSTALL: YES
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge.dev.widget
+          INFOPLIST_KEY_CFBundleDisplayName: MacPurge Dev Widget
+          CODE_SIGN_ENTITLEMENTS: Packaging/dev-widget-entitlements.plist
+        Development:
+          PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge.dev.widget
+          INFOPLIST_KEY_CFBundleDisplayName: MacPurge Dev Widget
+          CODE_SIGN_ENTITLEMENTS: Packaging/dev-widget-entitlements.plist
 schemes:
   MacPurge:
     build:
       targets:
         MacPurge: all
+    run:
+      config: Development
+    archive:
+      config: Release

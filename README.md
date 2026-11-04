@@ -18,6 +18,13 @@ swift test
 ./script/build_and_run.sh
 ```
 
+The local run script builds **MacPurge Dev** with an orange **DEV** icon badge,
+bundle identifier `com.burakerenoglu.macpurge.dev`, and separate preferences,
+history, Trash receipts and widget data. Xcode's Run action also uses the
+Development configuration. Production archives and GitHub releases use the
+normal MacPurge identity and icon. Development builds cannot install production
+updates over themselves.
+
 ## Releases and updates
 
 The app checks public GitHub Releases and validates the matching update manifest, SHA-256, exact Developer ID publisher and Gatekeeper assessment. Installation stages a new app and retains the previous app until the replacement is observed running.

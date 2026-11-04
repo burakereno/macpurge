@@ -130,7 +130,7 @@ struct DiskView: View {
             Text(ReviewLanguage.text(title)).foregroundStyle(secondaryInk)
             Spacer(minLength: 12)
             Text(amount).fontWeight(.medium).monospacedDigit()
-        }.font(.caption)
+        }.font(.body)
     }
 
     private var secondaryInk: Color { .white.opacity(contrast == .increased ? 1 : 0.76) }

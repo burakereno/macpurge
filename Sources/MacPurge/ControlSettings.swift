@@ -7,7 +7,6 @@ struct ControlSettings: View {
   @Environment(AppPresence.self) private var presence
   @Environment(UpdateChecker.self) private var updater
   @Environment(\.scenePhase) private var scenePhase
-  @State private var proposedLocation: AppPresence.Location?
   @State private var loginStatus = SMAppService.mainApp.status
   @State private var changingLogin = false
   @State private var loginError: String?
@@ -23,7 +22,11 @@ struct ControlSettings: View {
     Form {
       Section("General") {
         Toggle("Show in Dock", isOn: locationToggle(.dock))
+          .disabled(!presence.location.canHide(.dock))
+          .help("Keep at least one icon visible in the Dock or menu bar.")
         Toggle("Show in menu bar", isOn: locationToggle(.menuBar))
+          .disabled(!presence.location.canHide(.menuBar))
+          .help("Keep at least one icon visible in the Dock or menu bar.")
         Toggle("Girişte aç", isOn: Binding(
           get: { loginStatus == .enabled || loginStatus == .requiresApproval },
           set: { updateLogin($0) }
@@ -35,34 +38,6 @@ struct ControlSettings: View {
         if let loginError { Text(loginError).font(.caption).foregroundStyle(.secondary) }
       }
       .toggleStyle(.switch)
-      Section("Updates") {
-        LabeledContent("Version", value: updater.version)
-        Toggle("Automatically check for updates", isOn: Binding(
-          get: { updater.automaticChecks }, set: { updater.automaticChecks = $0 }))
-        HStack {
-          Button("Check for Updates…") { Task { await updater.check(manual: true) } }
-            .disabled(updater.checking || updater.installing)
-          if updater.checking || updater.installing { ProgressView().controlSize(.small) }
-          if updater.available {
-            Spacer()
-            Button("Download and Restart") {
-              scan.cancel()
-              Task { await updater.downloadAndInstall() }
-            }.disabled(scan.cleanup.busy || updater.installing)
-          }
-        }
-        if let status = updater.installationStatus {
-          Text(status).font(.caption).foregroundStyle(.secondary)
-        } else if let release = updater.release, updater.available {
-          Text(ReviewLanguage.format("MacPurge %@ is available.", release.version))
-            .font(.caption).foregroundStyle(.secondary)
-        } else if updater.lastChecked != nil && updater.lastError == nil {
-          Text("MacPurge is up to date.").font(.caption).foregroundStyle(.secondary)
-        }
-        if let error = updater.installationError ?? updater.lastError {
-          Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-        }
-      }
       Section("Görünüm") {
         Picker("Dil", selection: $language) {
           Text("Sistem").tag("system")
@@ -154,22 +129,36 @@ struct ControlSettings: View {
       }
       if let error { Text(ReviewLanguage.text(error)).foregroundStyle(.secondary) }
       Text("Alan planında seçtiğin önbellekleri inceleyip Çöp’e taşıyabilirsin.").font(.caption).foregroundStyle(.secondary)
-    }.formStyle(.grouped)
-      .onChange(of: scenePhase, initial: true) { loginStatus = SMAppService.mainApp.status }
-      .alert(
-        proposedLocation == .menuBar ? Text("Switch to the menu bar?") : Text("Switch to the Dock?"),
-        isPresented: Binding(get: { proposedLocation != nil }, set: { if !$0 { proposedLocation = nil } }),
-        presenting: proposedLocation
-      ) { location in
-        Button("Switch") { presence.use(location) }
-        Button("Vazgeç", role: .cancel) {}
-      } message: { location in
-        if location == .menuBar {
-          Text("MacPurge will stay available in the menu bar when its Dock icon is hidden.")
-        } else {
-          Text("MacPurge will stay available in the Dock when its menu bar icon is hidden.")
+      Section("Updates") {
+        LabeledContent("Version", value: updater.version)
+        Toggle("Automatically check for updates", isOn: Binding(
+          get: { updater.automaticChecks }, set: { updater.automaticChecks = $0 }))
+        HStack {
+          Button("Check for Updates…") { Task { await updater.check(manual: true) } }
+            .disabled(updater.checking || updater.installing)
+          if updater.checking || updater.installing { ProgressView().controlSize(.small) }
+          if updater.available {
+            Spacer()
+            Button("Download and Restart") {
+              scan.cancel()
+              Task { await updater.downloadAndInstall() }
+            }.disabled(scan.cleanup.busy || updater.installing)
+          }
+        }
+        if let status = updater.installationStatus {
+          Text(status).font(.caption).foregroundStyle(.secondary)
+        } else if let release = updater.release, updater.available {
+          Text(ReviewLanguage.format("MacPurge %@ is available.", release.version))
+            .font(.caption).foregroundStyle(.secondary)
+        } else if updater.lastChecked != nil && updater.lastError == nil {
+          Text("MacPurge is up to date.").font(.caption).foregroundStyle(.secondary)
+        }
+        if let error = updater.installationError ?? updater.lastError {
+          Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
       }
+    }.formStyle(.grouped)
+      .onChange(of: scenePhase, initial: true) { loginStatus = SMAppService.mainApp.status }
       .environment(\.locale, ReviewLanguage.locale(language))
       .onChange(of: language) { _, value in ReviewLanguage.apply(value) }
   }
@@ -177,12 +166,7 @@ struct ControlSettings: View {
   private func locationToggle(_ target: AppPresence.Location) -> Binding<Bool> {
     Binding(
       get: { presence.location == .both || presence.location == target },
-      set: { enabled in
-        let other: AppPresence.Location = target == .dock ? .menuBar : .dock
-        if enabled { presence.use(.both) }
-        else if presence.location == .both { presence.use(other) }
-        else { proposedLocation = other }
-      }
+      set: { presence.use(presence.location.setting(target, visible: $0)) }
     )
   }
 
@@ -268,6 +252,16 @@ struct DiskMenu: View {
     var hasDock: Bool { self != .menuBar }
     var hasMenu: Bool { self != .dock }
 
+    func canHide(_ target: Self) -> Bool { self == .both || self != target }
+
+    func setting(_ target: Self, visible: Bool) -> Self {
+      let shown = self == .both || self == target
+      guard visible != shown else { return self }
+      if visible { return .both }
+      guard canHide(target) else { return self }
+      return target == .dock ? .menuBar : .dock
+    }
+
     static func saved(in defaults: UserDefaults = .standard) -> Self {
       defaults.string(forKey: "appIconLocation").flatMap(Self.init(rawValue:))
         ?? (defaults.bool(forKey: "showsDiskMenu") ? .both : .dock)
@@ -300,19 +294,29 @@ struct DiskMenu: View {
 }
 
 struct SettingsSidebarFooter: View {
+  @Environment(UpdateChecker.self) private var updater
   let selected: Bool
   let openSettings: () -> Void
 
   var body: some View {
-    Divider().padding(.horizontal, 10)
     List(selection: Binding<Bool?>(
       get: { selected ? true : nil },
       set: { if $0 == true { openSettings() } }
     )) {
+      if updater.available {
+        Button(action: openSettings) {
+          Label("Update Available", systemImage: "arrow.down.circle")
+            .foregroundStyle(.tint)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Open update settings")
+      }
       Label("Ayarlar", systemImage: "gearshape").tag(true)
     }
     .listStyle(.sidebar)
     .scrollDisabled(true)
-    .frame(height: 44)
+    .frame(height: updater.available ? 76 : 44)
   }
 }

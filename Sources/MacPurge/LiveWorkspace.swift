@@ -19,7 +19,7 @@ struct LiveWorkspace: View {
     NavigationSplitView {
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 9) {
-          LayerMark().frame(width: 26, height: 29)
+          LayerMark().frame(width: 32, height: 32)
           Text("MacPurge").font(.system(size: 19, weight: .bold)).tracking(-0.7)
         }.padding(.leading, 18).padding(.top, 13).padding(.bottom, 19)
         List(
@@ -34,9 +34,6 @@ struct LiveWorkspace: View {
             Label("Etkinlik", systemImage: "clock.arrow.circlepath").tag(LiveSection.activity)
           }
         }.listStyle(.sidebar)
-        Label("Önizlemeli temizlik", systemImage: "checkmark.shield")
-          .font(.callout.weight(.medium)).foregroundStyle(.secondary)
-          .padding(.leading, 18).padding(.bottom, 8)
         SettingsSidebarFooter(selected: section == .settings) { section = .settings }
       }
       .navigationSplitViewColumnWidth(min: 165, ideal: 194, max: 230)

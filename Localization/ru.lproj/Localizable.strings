@@ -290,3 +290,8 @@
 "Diğer kullanım" = "Другое использование";
 "Güvenli alan tarama ve kontroller tamamlandığında gösterilir." = "Объём для безопасной очистки появится после сканирования и проверок.";
 "Temizlemeden önce dosyaları ve etkilerini incele." = "Перед очисткой проверьте файлы и последствия.";
+
+/* Sidebar update action and icon visibility */
+"Update Available" = "Доступно обновление";
+"Open update settings" = "Открыть настройки обновления";
+"Keep at least one icon visible in the Dock or menu bar." = "Хотя бы один значок должен оставаться в Dock или строке меню.";

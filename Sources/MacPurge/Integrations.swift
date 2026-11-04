@@ -182,6 +182,7 @@ struct MacPurgeShortcuts: AppShortcutsProvider {
 final class NoticeDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
   var showActivity: (() -> Void)?
   var showSettings: (() -> Void)?
+  var showWorkspace: (() -> Void)?
 
   private var settingsShortcut: Any?
 
@@ -197,7 +198,12 @@ final class NoticeDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-    !AppPresence.Location.saved().hasMenu
+    false
+  }
+
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+    if !hasVisibleWindows { showWorkspace?() }
+    return true
   }
 
   func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {

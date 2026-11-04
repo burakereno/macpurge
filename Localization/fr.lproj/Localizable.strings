@@ -290,3 +290,8 @@
 "Diğer kullanım" = "Autre utilisation";
 "Güvenli alan tarama ve kontroller tamamlandığında gösterilir." = "L’espace sûr s’affiche une fois l’analyse et les vérifications terminées.";
 "Temizlemeden önce dosyaları ve etkilerini incele." = "Vérifiez les fichiers et les effets avant de nettoyer.";
+
+/* Sidebar update action and icon visibility */
+"Update Available" = "Mise à jour disponible";
+"Open update settings" = "Ouvrir les réglages de mise à jour";
+"Keep at least one icon visible in the Dock or menu bar." = "Gardez au moins une icône visible dans le Dock ou la barre des menus.";

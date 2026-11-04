@@ -184,7 +184,7 @@ actor CacheTrash {
     ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: ".Trash")
   static let shared = CacheTrash(
     home: FileManager.default.homeDirectoryForCurrentUser,
-    journal: URL.applicationSupportDirectory.appending(path: "MacPurge/TrashReceipts"),
+    journal: BuildIdentity.supportDirectory.appending(path: "TrashReceipts"),
     trash: userTrash)
   let home: URL
   let journal: URL

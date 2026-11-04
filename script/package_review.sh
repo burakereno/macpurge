@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-app="$PWD/dist/MacPurge.app"
+# Production-package validation; development bundles use a different identity.
+app="${1:-$PWD/.build/MacPurge.app}"
 test -d "$app"
 codesign --verify --deep --strict "$app"
 version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"

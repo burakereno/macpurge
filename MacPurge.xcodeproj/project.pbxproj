@@ -19,6 +19,7 @@
 		2455246A2CB2A2583E3AE1F2 /* ProjectDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F89393DB6E59C67B0D857CA /* ProjectDiscovery.swift */; };
 		24B234AB9147DA56F61DF8DB /* FlowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 163DD92877C37CF6B669EC26 /* FlowViews.swift */; };
 		2AB4D4F17E7E14B17E87A591 /* StartupProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F6E8171F38D4346A63BDB9D /* StartupProbe.swift */; };
+		2ACD5F9B3B60EA5D1831C5EB /* BuildIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AB9EF6E30CE3CB4E9CA5D0E /* BuildIdentity.swift */; };
 		2D8113525DA65791A1F659F2 /* DiskView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEB8B2073DADE067D248CC9B /* DiskView.swift */; };
 		2E3053F96BE5A96521E3B714 /* MacPurgeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54405A12CF559393C9136E92 /* MacPurgeApp.swift */; };
 		3E89C1FB5A4B6AA3823DC9D7 /* StorageCategories.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C7F88A9316E883611393FD5 /* StorageCategories.swift */; };
@@ -41,10 +42,12 @@
 		818909BE447D6DA844E9F096 /* DirectoryIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC5CDEFA9ECAD29A10174D72 /* DirectoryIndex.swift */; };
 		940EDAAFEBB43A5C9F12A1C8 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D959A520CF0BB81CFDE3B6D3 /* UpdateChecker.swift */; };
 		955810AEDC26A8BAEF2D157C /* ScanReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0920656BBBB30F2A0BCD75DE /* ScanReport.swift */; };
+		966A9C1F6C084CF6513D88A4 /* BuildIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AB9EF6E30CE3CB4E9CA5D0E /* BuildIdentity.swift */; };
 		96BB9D99CDF968551E0FD184 /* UpdateSecurity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B8E563E52C3839744918B3 /* UpdateSecurity.swift */; };
 		9BEBCE34F343D81E2787A79E /* ReviewViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F6C5E75E6D3FCB104D18486 /* ReviewViews.swift */; };
 		9C655D57EAEE2E1C6C517F41 /* AppShortcuts.strings in Resources */ = {isa = PBXBuildFile; fileRef = 2BE4DDBED942FDB804BE483A /* AppShortcuts.strings */; };
 		A8C9EC03476F4525AB278F42 /* WeeklyGrowth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B5E07F74635607FD6E7896 /* WeeklyGrowth.swift */; };
+		AAD73BAF4A7D0DD3276D7C86 /* AppIcon-Dev.icns in Resources */ = {isa = PBXBuildFile; fileRef = 582958CADDB6FCE28E67AE14 /* AppIcon-Dev.icns */; };
 		AC55A37FAE06A6679A9F13E0 /* ToolOwnership.swift in Sources */ = {isa = PBXBuildFile; fileRef = D38FCA09946BF104A8D91F7A /* ToolOwnership.swift */; };
 		AE1812B9D6170DD76A1B90DC /* WorkspaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 342E6BBFA9CB6B68F0D21800 /* WorkspaceViews.swift */; };
 		AF67E40043FB2E41493E247B /* ExternalProjects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D2D6236758325AACFB931E1 /* ExternalProjects.swift */; };
@@ -109,6 +112,7 @@
 		4DF2064FC888EC1EB92B6893 /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
 		4E5BBE396ECB79922C6BBF6F /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/Localizable.strings; sourceTree = "<group>"; };
 		54405A12CF559393C9136E92 /* MacPurgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPurgeApp.swift; sourceTree = "<group>"; };
+		582958CADDB6FCE28E67AE14 /* AppIcon-Dev.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = "AppIcon-Dev.icns"; sourceTree = "<group>"; };
 		5B3E7CC5E344ECE540889884 /* MacPurge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacPurge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5F801EC7A6CADC347E69F604 /* SimulatorDevices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatorDevices.swift; sourceTree = "<group>"; };
 		67C9222B4636CD49F100455E /* Regrowth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Regrowth.swift; sourceTree = "<group>"; };
@@ -120,6 +124,7 @@
 		7F89393DB6E59C67B0D857CA /* ProjectDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDiscovery.swift; sourceTree = "<group>"; };
 		83C15471F5CA8C3CA72F0FF1 /* ReleaseContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseContract.swift; sourceTree = "<group>"; };
 		83FE3885B2D689467FEC0F7B /* MacPurgeWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MacPurgeWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		8AB9EF6E30CE3CB4E9CA5D0E /* BuildIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildIdentity.swift; sourceTree = "<group>"; };
 		8BCEF36AF60A01E8076FA5DE /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/Localizable.strings; sourceTree = "<group>"; };
 		9975B5DD28B45583326386B4 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		9BA4BBF253C542BF43D6E83C /* MeasurementCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCache.swift; sourceTree = "<group>"; };
@@ -164,6 +169,7 @@
 			isa = PBXGroup;
 			children = (
 				0AB427338D24B6439F8F29B1 /* ActivityRetention.swift */,
+				8AB9EF6E30CE3CB4E9CA5D0E /* BuildIdentity.swift */,
 				F244222CDCB700A20A8502B9 /* CacheTrash.swift */,
 				C81EF058513499F32A3D7E60 /* CategoryLocations.swift */,
 				BECA3AB885269829B2862264 /* CleanupMeasurement.swift */,
@@ -242,6 +248,7 @@
 		8D1A2A030637EAC213CAB1E8 /* Artwork */ = {
 			isa = PBXGroup;
 			children = (
+				582958CADDB6FCE28E67AE14 /* AppIcon-Dev.icns */,
 				9975B5DD28B45583326386B4 /* AppIcon.icns */,
 			);
 			path = Artwork;
@@ -359,6 +366,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AAD73BAF4A7D0DD3276D7C86 /* AppIcon-Dev.icns in Resources */,
 				E4CB96A46B560954E4CF0447 /* AppIcon.icns in Resources */,
 				9C655D57EAEE2E1C6C517F41 /* AppShortcuts.strings in Resources */,
 				128164BDF747CCB0FF499216 /* Localizable.strings in Resources */,
@@ -373,6 +381,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				2376C0F48C901D65A4F08072 /* ActivityRetention.swift in Sources */,
+				966A9C1F6C084CF6513D88A4 /* BuildIdentity.swift in Sources */,
 				BF9DD98AE3F7F769403EC13E /* CacheTrash.swift in Sources */,
 				5E414F94A3EAE18C2EE26F31 /* CategoryLocations.swift in Sources */,
 				11965E576746D1114A6BA198 /* CleanupMeasurement.swift in Sources */,
@@ -426,6 +435,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2ACD5F9B3B60EA5D1831C5EB /* BuildIdentity.swift in Sources */,
 				CA5106B5D7A359BDB65977BC /* MacPurgeWidget.swift in Sources */,
 				4649A4A373005B96100AD323 /* WidgetSnapshot.swift in Sources */,
 			);
@@ -506,7 +516,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 26;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -527,18 +537,40 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.6.1;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG MACPURGE_DEVELOPMENT";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
+		};
+		8CD11D2A6C06CC0824B12D41 /* Development */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "Packaging/dev-app-entitlements.plist";
+				COMBINE_HIDPI_IMAGES = YES;
+				EXECUTABLE_NAME = MacPurge;
+				INFOPLIST_FILE = "Packaging/App-Info.plist";
+				INFOPLIST_KEY_CFBundleIconFile = AppIcon.icns;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACPURGE_ICON_FILE = "AppIcon-Dev.icns";
+				OTHER_SWIFT_FLAGS = "$(inherited) -D MACPURGE_BUNDLE -package-name macpurge";
+				PRODUCT_BUNDLE_IDENTIFIER = com.burakerenoglu.macpurge.dev;
+				PRODUCT_NAME = "MacPurge Dev";
+				SDKROOT = macosx;
+			};
+			name = Development;
 		};
 		9DD9CDEC20E48AE82E008725 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -546,12 +578,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Packaging/app-entitlements.plist";
 				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = "Packaging/App-Info.plist";
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon.icns;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACPURGE_ICON_FILE = AppIcon.icns;
 				OTHER_SWIFT_FLAGS = "$(inherited) -D MACPURGE_BUNDLE -package-name macpurge";
 				PRODUCT_BUNDLE_IDENTIFIER = com.burakerenoglu.macpurge;
 				SDKROOT = macosx;
@@ -594,7 +628,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 26;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -609,7 +643,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.6.1;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -624,15 +658,16 @@
 		C8A78F2BDB2313F0DDC1C31C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Packaging/widget-entitlements.plist";
+				CODE_SIGN_ENTITLEMENTS = "Packaging/dev-widget-entitlements.plist";
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = "Packaging/Widget-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "MacPurge Dev Widget";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.burakerenoglu.macpurge.widget;
+				PRODUCT_BUNDLE_IDENTIFIER = com.burakerenoglu.macpurge.dev.widget;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 			};
@@ -642,19 +677,111 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = "Packaging/app-entitlements.plist";
+				CODE_SIGN_ENTITLEMENTS = "Packaging/dev-app-entitlements.plist";
 				COMBINE_HIDPI_IMAGES = YES;
+				EXECUTABLE_NAME = MacPurge;
+				INFOPLIST_FILE = "Packaging/App-Info.plist";
 				INFOPLIST_KEY_CFBundleIconFile = AppIcon.icns;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACPURGE_ICON_FILE = "AppIcon-Dev.icns";
 				OTHER_SWIFT_FLAGS = "$(inherited) -D MACPURGE_BUNDLE -package-name macpurge";
-				PRODUCT_BUNDLE_IDENTIFIER = com.burakerenoglu.macpurge;
+				PRODUCT_BUNDLE_IDENTIFIER = com.burakerenoglu.macpurge.dev;
+				PRODUCT_NAME = "MacPurge Dev";
 				SDKROOT = macosx;
 			};
 			name = Debug;
+		};
+		D28322C83CBF1EFBB2BB36F2 /* Development */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 26;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.6.1;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG MACPURGE_DEVELOPMENT";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Development;
+		};
+		F3FB8017E5003E2BF95404F1 /* Development */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Packaging/dev-widget-entitlements.plist";
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = "Packaging/Widget-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "MacPurge Dev Widget";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.burakerenoglu.macpurge.dev.widget;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Development;
 		};
 		FCF2E6BB76579D908CD88F78 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -680,6 +807,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D086DDACD80AB91AEC061640 /* Debug */,
+				8CD11D2A6C06CC0824B12D41 /* Development */,
 				9DD9CDEC20E48AE82E008725 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -689,6 +817,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				4EAEB36028692EFE51737521 /* Debug */,
+				D28322C83CBF1EFBB2BB36F2 /* Development */,
 				A17052CC76CB14F1957E68E6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -698,6 +827,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				C8A78F2BDB2313F0DDC1C31C /* Debug */,
+				F3FB8017E5003E2BF95404F1 /* Development */,
 				FCF2E6BB76579D908CD88F78 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;

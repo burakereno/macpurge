@@ -20,9 +20,9 @@ struct DiskProvider: TimelineProvider {
 
 @main struct MacPurgeWidget: Widget {
   var body: some WidgetConfiguration {
-    StaticConfiguration(kind: "MacPurge.Disk", provider: DiskProvider()) { entry in
+    StaticConfiguration(kind: BuildIdentity.widgetKind, provider: DiskProvider()) { entry in
       VStack(alignment: .leading, spacing: 5) {
-        Label("MacPurge", systemImage: "externaldrive").font(.caption.weight(.semibold))
+        Label(BuildIdentity.name, systemImage: "externaldrive").font(.caption.weight(.semibold))
         if let reading = entry.snapshot {
           Text(reading.free.map { $0.formatted(.byteCount(style: .file)) } ?? "—").font(
             .title.bold())

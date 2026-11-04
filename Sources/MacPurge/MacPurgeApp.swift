@@ -14,7 +14,8 @@ struct MacPurgeApp: App {
   @AppStorage("scheduledScan") private var daily = false
 
   var body: some Scene {
-    Window("MacPurge", id: "workspace") {
+    let menuInserted = presence.location.hasMenu
+    Window(BuildIdentity.name, id: "workspace") {
       Group {
         if showingDemo {
           WorkspaceView(demo: demo, scan: scan)
@@ -34,6 +35,7 @@ struct MacPurgeApp: App {
         }
       }
       .onAppear {
+        noticeDelegate.showWorkspace = { showWorkspace() }
         noticeDelegate.showSettings = { showWorkspace(settings: true) }
         noticeDelegate.showActivity = {
           if showingDemo { demo.show(.activity) } else { section = .activity }
@@ -81,8 +83,8 @@ struct MacPurgeApp: App {
         }
       }
     }
-    MenuBarExtra("MacPurge", systemImage: "square.3.layers.3d", isInserted: Binding(
-      get: { presence.location.hasMenu },
+    MenuBarExtra(BuildIdentity.name, systemImage: "square.3.layers.3d", isInserted: Binding(
+      get: { menuInserted },
       set: { presence.setMenuInserted($0) }
     )) {
       DiskMenu(scan: scan, showWorkspace: { showWorkspace() }, showSettings: { showWorkspace(settings: true) })
@@ -109,7 +111,7 @@ struct WorkspaceView: View {
     NavigationSplitView {
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 9) {
-          LayerMark().frame(width: 26, height: 29)
+          LayerMark().frame(width: 32, height: 32)
           Text("MacPurge").font(.system(size: 19, weight: .bold)).tracking(-0.7)
         }.padding(.leading, 18).padding(.top, 13).padding(.bottom, 19)
         List(
@@ -122,14 +124,6 @@ struct WorkspaceView: View {
             }
           }
         }.listStyle(.sidebar)
-        Spacer(minLength: 0)
-        HStack(spacing: 9) {
-          Image(systemName: "flask").foregroundStyle(Ink.sea).font(.system(size: 16))
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Örnek oturum").font(.callout.weight(.semibold))
-            Text("Veriler simüle edilir").font(.caption).foregroundStyle(.secondary)
-          }
-        }.padding(.leading, 19).padding(.bottom, 8)
         SettingsSidebarFooter(selected: demo.workspace == .settings) { demo.show(.settings) }
       }
       .navigationSplitViewColumnWidth(min: 165, ideal: 194, max: 230)

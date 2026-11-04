@@ -22,3 +22,10 @@ For local preparation, `APP_VERSION=X.Y.Z scripts/build-app.sh` creates a signed
 The updater expects `MacPurge.dmg` and `MacPurge.dmg.update.json` in the same public release. The manifest contains `version`, `asset`, `sha256`, `bundleIdentifier` and `teamIdentifier`. It detects damaged or mismatched assets; exact Developer ID and Gatekeeper checks authenticate the publisher.
 
 Prototype preferences are imported once into the production bundle's defaults domain. Scan history and Trash restore journals keep their existing application-support paths.
+
+The normal local run script builds `dist/MacPurge Dev.app` using Xcode's
+Development configuration. It uses a DEV icon badge, bundle identifier
+`com.burakerenoglu.macpurge.dev`, independent widget group, and
+`Application Support/MacPurge Dev` storage. It does not import production
+preferences or install production updates. Archive and release scripts continue
+to use the Release configuration and production identity.

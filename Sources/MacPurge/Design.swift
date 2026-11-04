@@ -20,21 +20,23 @@ struct SymbolTile: View {
     }
 }
 
+@MainActor
 struct LayerMark: View {
-    var body: some View {
-        Canvas { ctx, size in
-            for i in 0..<3 {
-                let y = CGFloat(i) * 0.19 + 0.12
-                var p = Path()
-                for (j, vertex) in [(0.12, y + 0.15), (0.51, y), (0.88, y + 0.15), (0.49, y + 0.31)].enumerated() {
-                    let point = CGPoint(x: vertex.0 * size.width, y: vertex.1 * size.height)
-                    if j == 0 { p.move(to: point) } else { p.addLine(to: point) }
-                }
-                p.closeSubpath()
-                ctx.fill(p, with: .color([Ink.mint, Color(red: 0.33, green: 0.79, blue: 0.67), Ink.sea][i]))
-            }
+    private static let image: NSImage = {
+        let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") as? String ?? "AppIcon.icns"
+        if let url = Bundle.main.url(forResource: name, withExtension: nil),
+           let image = NSImage(contentsOf: url) {
+            return image
         }
-        .accessibilityHidden(true)
+        return NSApplication.shared.applicationIconImage
+    }()
+
+    var body: some View {
+        Image(nsImage: Self.image)
+            .renderingMode(.original)
+            .resizable()
+            .scaledToFit()
+            .accessibilityHidden(true)
     }
 }
 

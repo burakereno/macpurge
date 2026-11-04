@@ -726,3 +726,8 @@
 "Move MacPurge to a writable Applications folder before updating." = "Move MacPurge to a writable Applications folder before updating.";
 "Update installation is available in the released MacPurge app." = "Update installation is available in the released MacPurge app.";
 "The update could not be installed. Your previous version was restored." = "The update could not be installed. Your previous version was restored.";
+
+/* Sidebar update action and icon visibility */
+"Update Available" = "Update Available";
+"Open update settings" = "Open update settings";
+"Keep at least one icon visible in the Dock or menu bar." = "Keep at least one icon visible in the Dock or menu bar.";

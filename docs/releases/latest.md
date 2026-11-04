@@ -1,10 +1,11 @@
-MacPurge provides a native view of macOS storage with reviewed cleanup actions.
+MacPurge 0.6.1 improves app access, settings and readability.
 
-- Storage inventory for Xcode, simulators, package caches, project folders, apps and more.
-- Review supported files before moving them to the Trash, with restore options.
-- Project discovery, space planning, file ages, activity history and storage trends.
-- Settings in the sidebar, Dock or menu bar access, and launch at login.
-- Scan exclusions and configurable 30-day, 90-day or unlimited activity retention.
-- In-app update checks with verified downloads, signed installers and rollback.
+- New app icon and matching sidebar logo.
+- Closing the window keeps MacPurge available in the Dock or menu bar.
+- Settings always keep at least one access icon enabled.
+- Available updates appear above Settings in the sidebar.
+- The Updates section now sits at the bottom of Settings.
+- Larger disk-summary labels and values.
+- Separate MacPurge Dev builds with a DEV icon and independent local data.
 
 For Intel and Apple Silicon Macs running macOS 14 or later. The app and DMG are signed with Developer ID, notarized by Apple, and stapled.

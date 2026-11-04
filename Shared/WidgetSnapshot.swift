@@ -4,7 +4,7 @@ struct WidgetSnapshot: Codable {
   let date: Date
   let free: Int64?
   let candidates: Int64
-  static let group = "66K3EFBVB6.com.burakerenoglu.macpurge.shared"
+  static let group = BuildIdentity.sharedGroup
   static var location: URL? {
     FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?.appending(
       path: "last-scan.json")

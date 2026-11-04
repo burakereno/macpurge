@@ -2,7 +2,7 @@ import Foundation
 
 enum UpdateInstaller {
   static var resultURL: URL {
-    URL.applicationSupportDirectory.appendingPathComponent("MacPurge/Updater/install-error.txt")
+    BuildIdentity.supportDirectory.appendingPathComponent("Updater/install-error.txt")
   }
 
   static func launch(dmg: URL, target: URL, release: UpdateRelease, directory: URL) throws {

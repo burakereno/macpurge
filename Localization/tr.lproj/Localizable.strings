@@ -408,3 +408,8 @@
 "Move MacPurge to a writable Applications folder before updating." = "Güncellemeden önce MacPurge’ü yazılabilir bir Uygulamalar klasörüne taşı.";
 "Update installation is available in the released MacPurge app." = "Güncelleme kurulumu, yayınlanan MacPurge uygulamasında kullanılabilir.";
 "The update could not be installed. Your previous version was restored." = "Güncelleme kurulamadı. Önceki sürümün geri yüklendi.";
+
+/* Sidebar update action and icon visibility */
+"Update Available" = "Güncelleme var";
+"Open update settings" = "Güncelleme ayarlarını aç";
+"Keep at least one icon visible in the Dock or menu bar." = "Dock veya menü çubuğunda en az bir simge görünür kalmalı.";
