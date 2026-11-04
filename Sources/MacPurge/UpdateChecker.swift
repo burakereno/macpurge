@@ -132,6 +132,7 @@ struct UpdateService: Sendable {
   private(set) var checking = false
   private(set) var installing = false
   private(set) var lastError: String?
+  private(set) var installationError: String?
   private(set) var lastChecked: Date?
   private(set) var installationStatus: String?
   private let currentVersion: String
@@ -196,6 +197,7 @@ struct UpdateService: Sendable {
     }
     installing = true
     lastError = nil
+    installationError = nil
     installationStatus = ReviewLanguage.text("Downloading update…")
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("macpurge-update-" + UUID().uuidString)
     var handedOff = false
@@ -223,7 +225,7 @@ struct UpdateService: Sendable {
   private func consumeInstallationResult() {
     let result = UpdateInstaller.resultURL
     if let message = try? String(contentsOf: result, encoding: .utf8), !message.isEmpty {
-      lastError = ReviewLanguage.text("The update could not be installed. Your previous version was restored.")
+      installationError = ReviewLanguage.text("The update could not be installed. Your previous version was restored.")
       try? FileManager.default.removeItem(at: result)
     }
   }

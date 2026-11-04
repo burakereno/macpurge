@@ -59,7 +59,7 @@ struct ControlSettings: View {
         } else if updater.lastChecked != nil && updater.lastError == nil {
           Text("MacPurge is up to date.").font(.caption).foregroundStyle(.secondary)
         }
-        if let error = updater.lastError {
+        if let error = updater.installationError ?? updater.lastError {
           Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
       }
