@@ -18,13 +18,8 @@ struct ProjectDetail: View {
             }
             VStack(alignment: .leading, spacing: 10) {
                 SectionHead(title: "Derleme çıktıları", note: diskAmount(demo.availableMB))
-                Surface {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Output.atlas) { output in
-                            OutputChoice(output: output, demo: demo)
-                            if output.id != Output.atlas.last?.id { Divider().padding(.leading, 44) }
-                        }
-                    }
+                InventoryList(Output.atlas.sorted { $0.mb > $1.mb }) { output in
+                    OutputChoice(output: output, demo: demo)
                 }
             }
             ViewThatFits(in: .horizontal) {
@@ -52,25 +47,18 @@ private struct OutputChoice: View {
     @State private var expanded = false
     var body: some View {
         let moved = demo.moved.contains(output.id)
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .top, spacing: 10) {
-                Toggle(output.name, isOn: Binding(get: { demo.selection.contains(output.id) }, set: { _ in demo.toggle(output) }))
-                    .toggleStyle(.checkbox).labelsHidden().disabled(moved)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(output.name).font(.headline)
-                    Text(moved ? "Örnek Çöp’te" : output.effect).font(.callout).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(diskAmount(output.mb)).font(.headline).monospacedDigit()
-                Button { expanded.toggle() } label: {
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                }.buttonStyle(.borderless).accessibilityLabel("\(output.name) konumu").help("Örnek dosya yolunu göster")
+        InventoryDisclosure(isExpanded: $expanded, selectable: [], selected: .constant([]),
+            busy: moved, selectionHelp: output.name,
+            selection: Binding(get: { demo.selection.contains(output.id) }, set: { _ in demo.toggle(output) })) {
+            Text(output.location).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                .textSelection(.enabled).padding(.leading, InventoryLayout.detailIndent)
+                .padding(.vertical, InventoryLayout.verticalPadding)
+        } label: {
+            InventoryGroupHeader(title: ReviewLanguage.text(output.name), symbol: "doc", tint: Ink.sea,
+                amount: diskAmount(output.mb), subtitle: ReviewLanguage.text(moved ? "Örnek Çöp’te" : output.effect)) {
+                SafetyBadge(level: .safe)
             }
-            if expanded {
-                Text(output.location).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
-                    .textSelection(.enabled).padding(.leading, 25)
-            }
-        }.padding(.horizontal, 16).padding(.vertical, 13)
+        } accessory: { EmptyView() }
     }
 }
 
@@ -79,19 +67,16 @@ struct Review: View {
     var body: some View {
         Page {
             PageTitle(kicker: "Proje / Önizleme", title: "İşlem planı", subtitle: "Seçtiğin çıktılar örnek Çöp’e taşınacak. İşlemi sonuç ekranından geri alabilirsin.")
-            Surface {
-                VStack(alignment: .leading, spacing: 14) {
-                    SectionHead(title: "Çöp’e taşınacaklar", note: "\(demo.draft.count) çıktı")
-                    ForEach(demo.draft) { item in
-                        HStack {
-                            Label(item.name, systemImage: "doc").foregroundStyle(.secondary)
-                            Spacer()
-                            Text(diskAmount(item.mb)).monospacedDigit()
-                        }
-                    }
-                    Divider()
-                    HStack { Text("Toplam").font(.headline); Spacer(); Text(diskAmount(demo.draftMB)).font(.title2.weight(.semibold)) }
-                }.padding(20)
+            VStack(alignment: .leading, spacing: 14) {
+                SectionHead(title: "Çöp’e taşınacaklar", note: ReviewLanguage.format("%lld çıktı", Int64(demo.draft.count)))
+                InventoryList(demo.draft.sorted { $0.mb > $1.mb }) { item in
+                    InventoryReadout(title: ReviewLanguage.text(item.name), amount: diskAmount(item.mb), symbol: "doc")
+                }
+                HStack {
+                    Text("Toplam").font(.headline)
+                    Spacer()
+                    InventoryAmount(text: diskAmount(demo.draftMB), prominent: true)
+                }
             }
             VStack(alignment: .leading, spacing: 9) {
                 Note(symbol: "lock", text: "Atlas Studio’nun kaynak kodu proje klasöründe kalır.")
@@ -114,7 +99,7 @@ struct ResultView: View {
     var body: some View {
         Page {
             PageTitle(kicker: "Proje / İşlem sonucu", title: receipt.restored ? "İşlem geri alındı" : "İşlem tamamlandı",
-                      subtitle: receipt.restored ? "Seçtiğin çıktılar örnek projedeki yerlerine döndü." : "\(receipt.outputs.count) derleme çıktısı örnek Çöp’e taşındı.")
+                      subtitle: receipt.restored ? "Seçtiğin çıktılar örnek projedeki yerlerine döndü." : ReviewLanguage.format("%lld derleme çıktısı örnek Çöp’e taşındı.", Int64(receipt.outputs.count)))
             Surface {
                 VStack(alignment: .leading, spacing: 16) {
                     Label(receipt.restored ? "Yerine dönen" : "Çöp’e taşınan", systemImage: receipt.restored ? "arrow.uturn.backward" : "trash")
@@ -127,8 +112,8 @@ struct ResultView: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 SectionHead(title: "İşlenen çıktılar")
-                ForEach(receipt.outputs) { output in
-                    Label("\(output.name) · \(diskAmount(output.mb))", systemImage: "checkmark").font(.callout)
+                InventoryList(receipt.outputs.sorted { $0.mb > $1.mb }) { output in
+                    InventoryReadout(title: ReviewLanguage.text(output.name), amount: diskAmount(output.mb), symbol: "checkmark")
                 }
             }
             HStack {

@@ -11,22 +11,47 @@ struct ReportItem: Identifiable, Codable, Hashable, Sendable {
   let name: String
   let category: String
   let path: String
-  let bytes: Int64?
+  var bytes: Int64?
   let status: String
   let safety: String?
   let reason: String
   let basis: String
-  let eligibleBytes: Int64
+  var eligibleBytes: Int64
   let modified: Date?
   let parts: [String: Int64]
   let volume: Int32?
+  var simulatorDataDevice: SimulatorDevice? = nil
   var workspace: String? = nil
   var runtimeUsage: RuntimeUsage? = nil
   var directoryInode: UInt64? = nil
   var age: FileAgeBreakdown? = nil
+  // Nil uses the date of the full scan. A cleanup only advances rows actually remeasured.
+  var measuredAt: Date? = nil
+  var containsExcludedFolders: Bool? = nil
+  var sharedLinkBytes: Int64? = nil
+  var reclaimableBytes: Int64 { max(0, (bytes ?? 0) - (sharedLinkBytes ?? 0)) }
 
   var complete: Bool { status == "complete" }
+  var actionTitle: String {
+    if category == ScanGroup.packages.rawValue && path.hasSuffix("/.npm/_cacache") {
+      return ReviewLanguage.text("npm önbelleğini temizle")
+    }
+    if name == (path as NSString).lastPathComponent { return name }
+    for (suffix, key) in Self.generatedSuffixes where name.hasSuffix(suffix) {
+      return ReviewLanguage.format(key, String(name.dropLast(suffix.count)))
+    }
+    return ReviewLanguage.text(name)
+  }
+  // Localize generated names at display time, including names in previous scans.
+  private static let generatedSuffixes = [
+    (" · cihaz verileri", "%@ · cihaz verileri"), (" · önbellek", "%@ · önbellek"),
+    (" · SDK/cihaz eşleşmesi yok", "%@ · SDK/cihaz eşleşmesi yok"),
+    (" · Derleme ara çıktıları", "%@ · Derleme ara çıktıları"),
+  ]
   var estimated: Bool { basis == "tool" }
+  var safePlanCandidate: Bool {
+    complete && basis == "allocated" && safety == SafetyLevel.safe.rawValue && eligibleBytes > 0
+  }
   var shortPath: String { (path as NSString).abbreviatingWithTildeInPath }
 }
 
@@ -43,12 +68,13 @@ struct ScanReport: Identifiable, Codable, Sendable {
 
   var scope: String? = nil  // Old snapshots can be viewed, but do not describe their full scan scope.
 
-  static func scopeKey(extended: Bool, protected: Bool, projects: [URL]) -> String {
+  static func scopeKey(extended: Bool, protected: Bool, projects: [URL], exclusions: [String] = []) -> String {
     let fields =
       [
         "storage-v2", extended ? "detailed" : "quick",
         extended && protected ? "protected" : "standard",
       ] + projects.map(\.path).sorted()
+      + (exclusions.isEmpty ? [] : ["exclusions"] + exclusions.sorted())
     return SHA256.hash(data: Data(fields.joined(separator: "\0").utf8)).map {
       String(format: "%02x", $0)
     }.joined()
@@ -76,12 +102,23 @@ struct ScanReport: Identifiable, Codable, Sendable {
     roots: [ScanRoot], results: [String: RootSize], disk: VolumeReading?, extended: Bool,
     homeDevice: Int32?
   ) -> Self {
+    let items = makeItems(roots: roots, results: results, homeDevice: homeDevice)
+    return .init(
+      id: UUID(), date: .now, extended: extended, free: disk?.free, capacity: disk?.bytes,
+      items: items.sorted { ($0.bytes ?? -1) > ($1.bytes ?? -1) })
+  }
+
+  static func itemID(_ root: ScanRoot, suffix: String = "") -> String {
+    SHA256.hash(data: Data((root.id + suffix).utf8)).map { String(format: "%02x", $0) }.joined()
+  }
+
+  static func makeItems(
+    roots: [ScanRoot], results: [String: RootSize], homeDevice: Int32?
+  ) -> [ReportItem] {
     var items: [ReportItem] = []
     for root in roots {
-      guard let result = results[root.id], result.state != .absent else { continue }
-      if root.group == .other && result.state == .complete && result.bytes < 500 * 1024 * 1024 {
-        continue
-      }
+      guard let result = results[root.id], result.state != .absent, root.includedInInventory(result)
+      else { continue }
       var basis = "allocated"
       if case .report = root.source { basis = "tool" }
       let state: String =
@@ -102,9 +139,7 @@ struct ScanReport: Identifiable, Codable, Sendable {
         } else {
           reason = assessment?.reason ?? "Ölçüm bilgisi"
         }
-        let key = SHA256.hash(data: Data((root.id + suffix).utf8)).map {
-          String(format: "%02x", $0)
-        }.joined()
+        let key = itemID(root, suffix: suffix)
         let eligible =
           assessment?.level == .safe && result.state == .complete && basis == "allocated"
           && (profile != .simulatorCache || root.device != nil)
@@ -114,15 +149,17 @@ struct ScanReport: Identifiable, Codable, Sendable {
             id: key, name: name, category: root.group.rawValue, path: root.url.path, bytes: bytes,
             status: state,
             safety: assessment?.level.rawValue, reason: reason, basis: basis,
-            eligibleBytes: eligible ? max(0, candidate) : 0,
+            eligibleBytes: eligible && !root.containsScanExclusions ? max(0, candidate) : 0,
             modified: result.modified, parts: parts, volume: result.measuredDevice,
+            simulatorDataDevice: profile == .simulatorData ? root.device : nil,
             workspace: root.workspace, runtimeUsage: root.runtimeUsage,
-            directoryInode: result.measuredInode, age: result.measured ? result.age : nil))
+            directoryInode: result.measuredInode, age: result.measured ? result.age : nil,
+            containsExcludedFolders: root.containsScanExclusions ? true : nil,
+            sharedLinkBytes: profile == .simulatorData
+              ? min(bytes ?? 0, result.sharedLinkBytes) : max(0, (bytes ?? 0) - candidate)))
       }
       let parts = Dictionary(
-        uniqueKeysWithValues: result.largest.sorted { a, b in
-          a.value == b.value ? a.key < b.key : a.value > b.value
-        }.prefix(5).map { ($0.key, $0.value) })
+        uniqueKeysWithValues: result.largestFive.map { ($0.key, $0.value) })
       if let device = root.device, result.measured {
         append(
           name: device.name + " · cihaz verileri", suffix: "/device",
@@ -132,29 +169,63 @@ struct ScanReport: Identifiable, Codable, Sendable {
           candidate: result.simulatorCacheBytes, profile: .simulatorCache, parts: [:])
       } else {
         append(
-          name: root.excludedDirectories.isEmpty && root.downloadCache == nil
-            ? root.title : ReviewLanguage.text(root.displayTitle),
+          name: root.displayTitle,
           suffix: root.group == .packages && !root.excludedDirectories.isEmpty ? "/remainder" : "",
           bytes: result.measured ? result.bytes : nil,
           candidate: result.bytes - result.sharedLinkBytes, profile: root.effectiveProfile(result),
           parts: parts)
       }
     }
-    return .init(
-      id: UUID(), date: .now, extended: extended, free: disk?.free, capacity: disk?.bytes,
-      items: items.sorted { $0.bytes ?? -1 > $1.bytes ?? -1 })
+    return items
   }
 
-  func plan(target: Int64, excluding hidden: Set<String> = []) -> [ReportItem] {
+  func safeItemsByCategory(excluding hidden: Set<String>) -> [String: [ReportItem]] {
+    Dictionary(
+      grouping: items.filter { $0.safety == SafetyLevel.safe.rawValue && !hidden.contains($0.id) },
+      by: \.category)
+  }
+
+  func movableItems(_ ids: Set<String>, states: [String: MoveAvailability], hidden: Set<String>)
+    -> [ReportItem]
+  {
+    items.filter {
+      ids.contains($0.id) && !hidden.contains($0.id) && $0.safePlanCandidate
+        && states[$0.id] == .ready
+    }
+  }
+
+  func rankedCandidates(
+    excluding hidden: Set<String>, moveStates: [String: MoveAvailability],
+    regrowth: [RegrownFolder], at now: Date = .now, actionBytes: [String: Int64] = [:]
+  ) -> [ReportItem] {
+    let candidates = items.filter {
+      $0.safePlanCandidate && !hidden.contains($0.id) && moveStates[$0.id] == .ready
+    }.map { row in
+      var row = row
+      if let bytes = actionBytes[row.id] { row.eligibleBytes = bytes }
+      return row
+    }
+    let deferred = RegrownFolder.deferredIDs(regrowth, candidates: candidates, at: now)
+    return candidates.sorted { a, b in
+      let later = deferred.contains(a.id)
+      if later != deferred.contains(b.id) { return !later }
+      return a.eligibleBytes != b.eligibleBytes ? a.eligibleBytes > b.eligibleBytes : a.id < b.id
+    }
+  }
+
+  func plan(
+    target: Int64, excluding hidden: Set<String> = [], moveStates: [String: MoveAvailability],
+    regrowth: [RegrownFolder] = [], at now: Date = .now, actionBytes: [String: Int64] = [:]
+  ) -> [ReportItem] {
     guard target > 0 else { return [] }
     var rows: [ReportItem] = []
-    var sum: Int64 = 0
-    for item in items.filter({ $0.eligibleBytes > 0 && !hidden.contains($0.id) }).sorted(by: {
-      $0.eligibleBytes != $1.eligibleBytes ? $0.eligibleBytes > $1.eligibleBytes : $0.id < $1.id
-    }) {
-      guard sum < target else { break }
+    var remaining = target
+    for item in rankedCandidates(
+      excluding: hidden, moveStates: moveStates, regrowth: regrowth, at: now, actionBytes: actionBytes)
+    {
       rows.append(item)
-      sum += item.eligibleBytes
+      if item.eligibleBytes >= remaining { break }
+      remaining -= item.eligibleBytes
     }
     return rows
   }
@@ -219,12 +290,63 @@ struct ScanReport: Identifiable, Codable, Sendable {
   }
 }
 
+/// One scan owns this accumulator. Keep report construction off the UI actor and build each row once.
+actor ScanReportBuilder {
+  let id: UUID
+  let scope: String
+  let extended: Bool
+  let disk: VolumeReading?
+  let device: Int32?
+  private var items: [ReportItem] = []
+
+  init(id: UUID, scope: String, extended: Bool, disk: VolumeReading?, device: Int32?) {
+    self.id = id
+    self.scope = scope
+    self.extended = extended
+    self.disk = disk
+    self.device = device
+  }
+
+  func append(_ roots: [ScanRoot], results: [String: RootSize]) {
+    items += ScanReport.makeItems(roots: roots, results: results, homeDevice: device)
+  }
+
+  func snapshot(
+    roots: [ScanRoot], results: [String: RootSize], sizes: [ScanGroup: GroupSize],
+    pending: Set<ScanGroup>, simulatorListIncomplete: Bool,
+    last: ScanReport?, final: Bool = false
+  ) -> ScanReport {
+    var groups: [String: Int64] = [:]
+    var incomplete = pending
+    if simulatorListIncomplete { incomplete.insert(.simulators) }
+    for root in roots {
+      if results[root.id]?.state != .complete && results[root.id]?.state != .absent {
+        incomplete.insert(root.group)
+      }
+      groups[root.group.rawValue] = sizes[root.group]?.bytes ?? 0
+    }
+    for group in incomplete { groups.removeValue(forKey: group.rawValue) }
+    var safety: [String: SafetyBreakdown] = [:]
+    for (group, size) in sizes { safety[group.rawValue] = size.breakdown }
+    let report = ScanReport(
+      id: id, date: .now, extended: extended, free: disk?.free,
+      capacity: disk?.bytes,
+      items: final ? items.sorted { ($0.bytes ?? -1) > ($1.bytes ?? -1) } : items,
+      groups: groups, groupSafety: safety, measuredGroupBytes: safety.mapValues(\.total),
+      scope: scope)
+    return report.retainingPending(pending, from: last)
+  }
+}
+
 /// Stores only completed snapshots. Each operation owns its SQLite connection.
 struct ScanArchive: Sendable {
   let file: URL
   static let standard = Self(
     file: URL.applicationSupportDirectory.appending(path: "MacPurge/History.sqlite"))
-  struct Failure: LocalizedError { let errorDescription: String? }
+  struct Failure: LocalizedError {
+    let errorDescription: String?
+    init(errorDescription: String) { self.errorDescription = ReviewLanguage.text(errorDescription) }
+  }
 
   private func connection<T>(write: Bool, _ body: (OpaquePointer) throws -> T) throws -> T? {
     if write {
@@ -258,25 +380,29 @@ struct ScanArchive: Sendable {
     }
   }
 
-  func read(limit: Int = 10) throws -> [ScanReport] {
+  private func decodedRow<T: Decodable>(_ query: OpaquePointer?) -> T? {
+    guard let ptr = sqlite3_column_blob(query, 0) else { return nil }
+    return try? JSONDecoder().decode(
+      T.self, from: Data(bytes: ptr, count: Int(sqlite3_column_bytes(query, 0))))
+  }
+
+  func read(limit: Int = 10, retention: ActivityRetention = .forever, at now: Date = .now) throws -> [ScanReport] {
     try connection(write: false) { db in
       var query: OpaquePointer?
       guard
-        sqlite3_prepare_v2(db, "SELECT payload FROM scans ORDER BY t DESC LIMIT ?", -1, &query, nil)
+        sqlite3_prepare_v2(db, "SELECT payload FROM scans WHERE t >= ? ORDER BY t DESC", -1, &query, nil)
           == SQLITE_OK
       else { throw Failure(errorDescription: "Geçmiş sorgulanamadı.") }
       defer { sqlite3_finalize(query) }
-      sqlite3_bind_int(query, 1, Int32(clamping: limit))
+      sqlite3_bind_double(query, 1, retention.cutoff(at: now)?.timeIntervalSince1970 ?? -Double.greatestFiniteMagnitude)
       var rows: [ScanReport] = []
-      while true {
+      while rows.count < limit {
         let status = sqlite3_step(query)
         if status == SQLITE_DONE { break }
-        guard status == SQLITE_ROW, let ptr = sqlite3_column_blob(query, 0) else {
+        guard status == SQLITE_ROW else {
           throw Failure(errorDescription: "Geçmiş okunamadı.")
         }
-        rows.append(
-          try JSONDecoder().decode(
-            ScanReport.self, from: Data(bytes: ptr, count: Int(sqlite3_column_bytes(query, 0)))))
+        if let row: ScanReport = decodedRow(query) { rows.append(row) }
       }
       return rows
     } ?? []
@@ -291,9 +417,9 @@ struct ScanArchive: Sendable {
         var query: OpaquePointer?
         let sql = """
           SELECT payload FROM scans WHERE t >= ? AND t < ?
-          AND json_extract(CAST(payload AS TEXT),'$.scope') = ?
-          AND json_extract(CAST(payload AS TEXT),'$.extended') = ?
-          ORDER BY t DESC LIMIT 1
+          AND CASE WHEN json_valid(CAST(payload AS TEXT)) THEN json_extract(CAST(payload AS TEXT),'$.scope') END = ?
+          AND CASE WHEN json_valid(CAST(payload AS TEXT)) THEN json_extract(CAST(payload AS TEXT),'$.extended') END = ?
+          ORDER BY t DESC
           """
         guard sqlite3_prepare_v2(db, sql, -1, &query, nil) == SQLITE_OK else {
           throw Failure(errorDescription: "Haftalık ölçümler okunamadı.")
@@ -310,22 +436,24 @@ struct ScanArchive: Sendable {
           sqlite3_reset(query)
           sqlite3_bind_double(query, 1, start.timeIntervalSince1970)
           sqlite3_bind_double(query, 2, end.timeIntervalSince1970)
-          let status = sqlite3_step(query)
-          if status == SQLITE_DONE { continue }
-          guard status == SQLITE_ROW, let ptr = sqlite3_column_blob(query, 0) else {
-            throw Failure(errorDescription: "Haftalık ölçümler okunamadı.")
+          while true {
+            let status = sqlite3_step(query)
+            if status == SQLITE_DONE { break }
+            guard status == SQLITE_ROW else {
+              throw Failure(errorDescription: "Haftalık ölçümler okunamadı.")
+            }
+            if let row: ScanReport = decodedRow(query) {
+              rows.append(row)
+              break
+            }
           }
-          rows.append(
-            try JSONDecoder().decode(
-              ScanReport.self,
-              from: Data(bytes: ptr, count: Int(sqlite3_column_bytes(query, 0)))))
         }
         return rows
       } ?? []
     return WeeklyGrowth(current: report, earlierDays: snapshots)
   }
 
-  func save(_ report: ScanReport) throws {
+  func save(_ report: ScanReport, retention: ActivityRetention = .forever, at now: Date = .now) throws {
     _ = try connection(write: true) { db in
       let data = try JSONEncoder().encode(report)
       try execute(db, "BEGIN IMMEDIATE")
@@ -346,10 +474,7 @@ struct ScanArchive: Sendable {
         guard status == SQLITE_DONE else {
           throw Failure(errorDescription: "Geçmiş kaydedilemedi.")
         }
-        try execute(
-          db,
-          "DELETE FROM scans WHERE t < unixepoch('now','-180 days') OR t NOT IN (SELECT t FROM scans ORDER BY t DESC LIMIT 400)"
-        )
+        try pruneScans(db, retention: retention, at: now)
         try execute(db, "DELETE FROM moved_folders WHERE t < unixepoch('now','-180 days')")
         try execute(db, "COMMIT")
       } catch {
@@ -359,15 +484,38 @@ struct ScanArchive: Sendable {
     }
   }
 
-  func remember(_ folders: [MovedFolder]) throws {
+  // Retention affects scan snapshots only. Trash receipts and regrowth evidence are separate.
+  func prune(retention: ActivityRetention, at now: Date = .now) throws {
+    guard FileManager.default.fileExists(atPath: file.path) else { return }
+    _ = try connection(write: true) { db in try pruneScans(db, retention: retention, at: now) }
+  }
+
+  private func pruneScans(_ db: OpaquePointer, retention: ActivityRetention, at now: Date) throws {
+    guard let cutoff = retention.cutoff(at: now) else { return }
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, "DELETE FROM scans WHERE t < ?", -1, &statement, nil) == SQLITE_OK
+    else { throw Failure(errorDescription: "Geçmiş güncellenemedi.") }
+    defer { sqlite3_finalize(statement) }
+    sqlite3_bind_double(statement, 1, cutoff.timeIntervalSince1970)
+    guard sqlite3_step(statement) == SQLITE_DONE else {
+      throw Failure(errorDescription: "Geçmiş güncellenemedi.")
+    }
+  }
+
+  func remember(_ folders: [MovedFolder], updatingEvidence: Bool = false) throws {
     guard !folders.isEmpty else { return }
     _ = try connection(write: true) { db in
       try execute(db, "BEGIN IMMEDIATE")
       do {
         var statement: OpaquePointer?
+        // Evidence from an in-flight scan cannot revive a restored or superseded receipt.
+        let sql =
+          updatingEvidence
+          ? "UPDATE moved_folders SET payload=?3 WHERE path=?1 AND t=?2 AND json_extract(CAST(payload AS TEXT),'$.receipt.id')=json_extract(CAST(?3 AS TEXT),'$.receipt.id')"
+          : "INSERT OR REPLACE INTO moved_folders VALUES (?,?,?)"
         guard
           sqlite3_prepare_v2(
-            db, "INSERT OR REPLACE INTO moved_folders VALUES (?,?,?)", -1, &statement, nil)
+            db, sql, -1, &statement, nil)
             == SQLITE_OK
         else {
           throw Failure(errorDescription: "Temizlik geçmişi yazılamadı.")
@@ -418,12 +566,10 @@ struct ScanArchive: Sendable {
       while true {
         let status = sqlite3_step(query)
         if status == SQLITE_DONE { return result }
-        guard status == SQLITE_ROW, let ptr = sqlite3_column_blob(query, 0) else {
+        guard status == SQLITE_ROW else {
           throw Failure(errorDescription: "Temizlik geçmişi okunamadı.")
         }
-        result.append(
-          try JSONDecoder().decode(
-            MovedFolder.self, from: Data(bytes: ptr, count: Int(sqlite3_column_bytes(query, 0)))))
+        if let folder: MovedFolder = decodedRow(query) { result.append(folder) }
       }
     } ?? []
   }
@@ -463,13 +609,24 @@ struct ScanArchive: Sendable {
 
 actor HistoryIO {
   static let shared = HistoryIO()
-  func load() throws -> [ScanReport] { try ScanArchive.standard.read(limit: 35) }
-  func weeklyGrowth(ending report: ScanReport) throws -> WeeklyGrowth {
-    try ScanArchive.standard.weeklyGrowth(ending: report)
+  private let archive: ScanArchive
+  init(archive: ScanArchive = .standard) { self.archive = archive }
+
+  func load(retention: ActivityRetention = .saved()) throws -> [ScanReport] {
+    try archive.read(limit: 35, retention: retention)
   }
-  func record(_ report: ScanReport) throws { try ScanArchive.standard.save(report) }
-  func remember(_ folders: [MovedFolder]) throws { try ScanArchive.standard.remember(folders) }
-  func movedFolders() throws -> [MovedFolder] { try ScanArchive.standard.movedFolders() }
-  func forgetMove(at path: String) throws { try ScanArchive.standard.forgetMove(at: path) }
-  func clear() throws { try ScanArchive.standard.clear() }
+
+  func prune(retention: ActivityRetention) throws { try archive.prune(retention: retention) }
+  func weeklyGrowth(ending report: ScanReport) throws -> WeeklyGrowth {
+    try archive.weeklyGrowth(ending: report)
+  }
+  func record(_ report: ScanReport, retention: ActivityRetention = .saved()) throws {
+    try archive.save(report, retention: retention)
+  }
+  func remember(_ folders: [MovedFolder], updatingEvidence: Bool = false) throws {
+    try archive.remember(folders, updatingEvidence: updatingEvidence)
+  }
+  func movedFolders() throws -> [MovedFolder] { try archive.movedFolders() }
+  func forgetMove(at path: String) throws { try archive.forgetMove(at: path) }
+  func clear() throws { try archive.clear() }
 }

@@ -1,11 +1,11 @@
 import Foundation
 
 enum PayloadVerification {
-  static let identifier = "com.burakerenoglu.macpurge.prototype"
-  static let team = "66K3EFBVB6"
+  static let identifier = ReleaseContract.bundleIdentifier
+  static let team = ReleaseContract.teamIdentifier
   struct Invalid: LocalizedError {
     let errorDescription: String?
-    init(_ message: String) { errorDescription = message }
+    init(_ message: String) { errorDescription = ReviewLanguage.text(message) }
   }
   @concurrent static func inspect(_ url: URL) async throws -> String {
     let requirement =
@@ -22,8 +22,7 @@ enum PayloadVerification {
     let current =
       Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     let relation = version.compare(current, options: .numeric)
-    return "İmza ve paket bütünlüğü doğrulandı · \(version) · "
-      + (relation == .orderedDescending
-        ? "Daha yeni sürüm" : relation == .orderedSame ? "Mevcut sürüm" : "Eski sürüm")
+    return ReviewLanguage.format("İmza ve paket bütünlüğü doğrulandı · %@ · %@", version, ReviewLanguage.text(relation == .orderedDescending
+        ? "Daha yeni sürüm" : relation == .orderedSame ? "Mevcut sürüm" : "Eski sürüm"))
   }
 }

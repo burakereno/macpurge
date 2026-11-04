@@ -12,14 +12,14 @@ enum InventoryCommand {
   enum Failure: Error { case failed, timedOut, tooLarge }
 
   @concurrent static func output(
-    _ executable: String, _ arguments: [String], timeout: Duration = .seconds(6)
+    _ executable: String, _ arguments: [String], timeout: Duration = .seconds(6), captureError: Bool = false
   ) async throws -> Data {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: executable)
     task.arguments = arguments
     let pipe = Pipe()
     task.standardOutput = pipe
-    task.standardError = FileHandle.nullDevice
+    task.standardError = captureError ? pipe : FileHandle.nullDevice
     task.standardInput = FileHandle.nullDevice
     try Task.checkCancellation()
     try task.run()
@@ -51,10 +51,38 @@ enum InventoryCommand {
 }
 
 enum ExtendedInventory {
+  /// Partition at real product/archive boundaries, including Xcode's dated archive folders.
+  /// Each byte belongs to one root. Unrecognized entries remain visible as measurements.
+  static func xcodeEntries(in folder: URL, device: dev_t?) throws -> [ScanRoot] {
+    let products = folder.lastPathComponent == "Products"
+    func entries(in parent: URL, dates: Bool) throws -> [ScanRoot] {
+      let children: [DirectoryIndex.Entry]
+      do {
+        children = try DirectoryIndex.children(of: parent, onDevice: device)
+      } catch let error as DirectoryIndex.Problem where error.code == ENOENT {
+        return []
+      } catch is CancellationError { throw CancellationError() } catch {
+        return [.init(group: .xcode, title: parent.lastPathComponent, url: parent, profile: .systemManaged)]
+      }
+      var roots: [ScanRoot] = []
+      for entry in children {
+        try Task.checkCancellation()
+        let name = entry.url.lastPathComponent
+        let actionable = entry.directory && (products || entry.url.pathExtension == "xcarchive")
+        if dates && entry.directory && name.wholeMatch(of: /[0-9]{4}-[0-9]{2}-[0-9]{2}/) != nil {
+          roots += try entries(in: entry.url, dates: false)
+        } else {
+          roots.append(.init(group: .xcode, title: name, url: entry.url,
+            profile: actionable ? .personal : .systemManaged, source: entry.directory ? .directory : .file))
+        }
+      }
+      return roots
+    }
+    return try entries(in: folder, dates: !products)
+  }
+
   @concurrent static func discover(
-    home: URL, includeProtected: Bool, simulatorInventory: SimulatorInventory,
-    selectedProjects: [URL] = [],
-    projectMeasurements: [String: RootSize] = [:]
+    home: URL, includeProtected: Bool, selectedProjects: [URL], volumes: ScanVolumes
   )
     async throws -> [ScanRoot]
   {
@@ -73,7 +101,9 @@ enum ExtendedInventory {
     ) throws {
       try Task.checkCancellation()
       do {
-        for entry in try DirectoryIndex.children(of: location) {
+        for entry in try DirectoryIndex.children(
+          of: location, onDevice: volumes.device(for: location))
+        {
           try Task.checkCancellation()
           guard keep(entry.url.lastPathComponent) else { continue }
           rows.append(
@@ -90,7 +120,10 @@ enum ExtendedInventory {
             source: .status("Konum listelenemedi")))
       }
     }
-    add(.xcode, "Dağıtım arşivleri", "Library/Developer/Xcode/Archives")
+    for folder in ["Archives", "Products"] {
+      let url = home.appending(path: "Library/Developer/Xcode/" + folder)
+      rows += try xcodeEntries(in: url, device: volumes.device(for: url))
+    }
     add(.xcode, "iOS aygıt desteği", "Library/Developer/Xcode/iOS DeviceSupport")
     for (item, path) in [
       ("Cypress", "Library/Caches/Cypress"), ("Playwright", "Library/Caches/ms-playwright"),
@@ -116,7 +149,7 @@ enum ExtendedInventory {
     let ollama =
       ProcessInfo.processInfo.environment["OLLAMA_MODELS"].map(URL.init(fileURLWithPath:))
       ?? home.appending(path: ".ollama/models")
-    let models = try await ModelInventory.ollama(at: ollama)
+    let models = try await ModelInventory.ollama(at: ollama, onDevice: volumes.device(for: ollama))
     if models.isEmpty { add(.models, "Ollama model deposu", ollama.path) } else { rows += models }
     add(.models, "LM Studio", ".lmstudio/models")
     add(.models, "PyTorch modelleri", ".cache/torch")
@@ -183,7 +216,6 @@ enum ExtendedInventory {
     for (name, path) in [
       ("Xcode önbellekleri", "Library/Caches/com.apple.dt.Xcode"),
       ("SwiftUI önizleme cihazları", "Library/Developer/Xcode/UserData/Previews/Simulator Devices"),
-      ("Xcode ürünleri", "Library/Developer/Xcode/Products"),
       ("Xcode kod asistanı", "Library/Developer/Xcode/CodingAssistant"),
       ("watchOS aygıt desteği", "Library/Developer/Xcode/watchOS DeviceSupport"),
       ("tvOS aygıt desteği", "Library/Developer/Xcode/tvOS DeviceSupport"),
@@ -216,8 +248,8 @@ enum ExtendedInventory {
     add(
       .simulators, "Simülatör paylaşılan dyld önbelleği",
       "/Library/Developer/CoreSimulator/Caches/dyld", .simulatorCache)
-    add(.logs, "Birleşik sistem günlükleri", "/private/var/db/diagnostics", .logs)
-    add(.logs, "Tanılama metin arşivi", "/private/var/db/uuidtext", .logs)
+    add(.logs, "Birleşik sistem günlükleri", SystemLogStore.path, .logs)
+    add(.logs, "Tanılama metin arşivi", SystemLogStore.textArchive, .logs)
     add(.logs, "iOS aygıt günlükleri", "Library/Developer/Xcode/iOS Device Logs", .logs)
     add(.system, "Sistem önbellekleri", "/Library/Caches", .systemManaged)
     if let cache = darwinUserDirectory(_CS_DARWIN_USER_CACHE_DIR) {
@@ -225,16 +257,24 @@ enum ExtendedInventory {
     }
     let known = ScanRoot.catalog(home: home, projects: selectedProjects) + rows
     rows += try CategoryLocations.discover(
-      home: home, known: known, includeProtected: includeProtected)
-    let tooling = try await toolReports(home: home, devices: simulatorInventory)
-    rows += tooling
-    let claimed = (ScanRoot.catalog(home: home, projects: []) + rows).map(\.url)
-    for project in selectedProjects {
-      rows += try CategoryLocations.largeFolders(
-        in: project, excluding: claimed,
-        measurement: projectMeasurements[project.path])
-    }
+      home: home, known: known, includeProtected: includeProtected, volumes: volumes)
     return rows
+  }
+
+  @concurrent static func projectFolders(
+    _ projects: [ScanRoot], results: [String: RootSize],
+    claimed: [URL]
+  ) async throws -> [ScanRoot] {
+    try projects.flatMap { root in
+      try CategoryLocations.largeFolders(
+        in: root.url, excluding: claimed, measurement: results[root.id],
+        onDevice: root.expectedDevice
+      ).map { child in
+        var child = child
+        child.expectedDevice = root.expectedDevice
+        return child
+      }
+    }
   }
 
   private static func darwinUserDirectory(_ key: Int32) -> String? {
@@ -285,15 +325,21 @@ enum ExtendedInventory {
     }
   }
 
-  private static func toolReports(home: URL, devices: SimulatorInventory) async throws -> [ScanRoot]
-  {
+  static func toolReports(home: URL, devices: SimulatorInventory) async throws -> [ScanRoot] {
+    async let runtimes = runtimeReports(devices)
+    async let snapshots = snapshotReports()
+    async let docker = dockerReports(home)
+    return try await runtimes + snapshots + docker
+  }
+
+  private static func toolError(_ group: ScanGroup, _ title: String, _ url: URL) -> ScanRoot {
+    .init(
+      group: group, title: title, url: url,
+      source: .status("Araç kullanılamıyor veya yanıt vermedi"))
+  }
+
+  private static func runtimeReports(_ devices: SimulatorInventory) async throws -> [ScanRoot] {
     var rows: [ScanRoot] = []
-    func toolError(_ group: ScanGroup, _ title: String, _ url: URL) {
-      rows.append(
-        .init(
-          group: group, title: title, url: url,
-          source: .status("Araç kullanılamıyor veya yanıt vermedi")))
-    }
     let runtimeRoot = URL(fileURLWithPath: "/Library/Developer/CoreSimulator/Images")
     do {
       let data = try await InventoryCommand.output(
@@ -308,8 +354,13 @@ enum ExtendedInventory {
       }
       rows += try runtimeRows(data: data, devices: devices, sdkBuilds: sdkBuilds, base: runtimeRoot)
     } catch is CancellationError { throw CancellationError() } catch {
-      toolError(.runtimes, "Runtime envanteri", runtimeRoot)
+      rows.append(toolError(.runtimes, "Runtime envanteri", runtimeRoot))
     }
+    return rows
+  }
+
+  private static func snapshotReports() async throws -> [ScanRoot] {
+    var rows: [ScanRoot] = []
     let snapshots = URL(fileURLWithPath: "/")
     do {
       let data = try await InventoryCommand.output("/usr/bin/tmutil", ["listlocalsnapshots", "/"])
@@ -323,33 +374,18 @@ enum ExtendedInventory {
             source: .report(nil)))
       }
     } catch is CancellationError { throw CancellationError() } catch {
-      toolError(.snapshots, "Yerel snapshot listesi", snapshots)
+      rows.append(toolError(.snapshots, "Yerel snapshot listesi", snapshots))
     }
+    return rows
+  }
+
+  private static func dockerReports(_ home: URL) async throws -> [ScanRoot] {
+    var rows: [ScanRoot] = []
     let fm = FileManager.default
-    let executable = [
-      "/usr/local/bin/docker", "/opt/homebrew/bin/docker",
-      "/Applications/Docker.app/Contents/Resources/bin/docker",
-    ].first(where: fm.isExecutableFile(atPath:))
     let sockets = [home.appending(path: ".docker/run/docker.sock").path, "/var/run/docker.sock"]
-    if let executable, let socket = sockets.first(where: fm.fileExists(atPath:)) {
+    if let socket = sockets.first(where: fm.fileExists(atPath:)) {
       let url = URL(fileURLWithPath: socket)
       do {
-        let data = try await InventoryCommand.output(
-          executable, ["--host", "unix://" + socket, "system", "df", "--format", "{{json .}}"])
-        struct Usage: Decodable {
-          let type: String
-          let reclaimable: String
-          enum CodingKeys: String, CodingKey { case type = "Type", reclaimable = "Reclaimable" }
-        }
-        for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
-          let usage = try JSONDecoder().decode(Usage.self, from: Data(line.utf8))
-          rows.append(
-            .init(
-              group: .docker, title: "Docker · " + usage.type + " (araç tahmini)", url: url,
-              profile: .personal,
-              source: .report(
-                parseBytes(String(usage.reclaimable.split(separator: " ").first ?? "")))))
-        }
         let local = try await InventoryCommand.output(
           "/usr/bin/curl",
           [
@@ -358,7 +394,7 @@ enum ExtendedInventory {
           ])
         rows += try ComposeInventory.rows(data: local, socket: url)
       } catch is CancellationError { throw CancellationError() } catch {
-        toolError(.docker, "Yerel Docker Engine", url)
+        rows.append(toolError(.docker, "Yerel Docker Engine", url))
       }
     } else {
       rows.append(
@@ -369,14 +405,4 @@ enum ExtendedInventory {
     return rows
   }
 
-  static func parseBytes(_ raw: String) -> Int64? {
-    let text = raw.trimmingCharacters(in: .whitespaces)
-    let digits = text.prefix { $0.isNumber || $0 == "." }
-    let unit = text.dropFirst(digits.count).trimmingCharacters(in: .whitespaces).uppercased()
-    guard let n = Double(digits),
-      let factor = ["B": 1.0, "KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12][unit],
-      n >= 0, n * factor < Double(Int64.max)
-    else { return nil }
-    return Int64(n * factor)
-  }
 }

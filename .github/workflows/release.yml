@@ -1,0 +1,121 @@
+name: Release MacPurge
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version X.Y.Z (empty: first contract version or next patch)'
+        required: false
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: macpurge-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Load and validate release contract
+        run: |
+          python3 scripts/validate-release-contract.py
+          cat .github/release-contract.env >> "$GITHUB_ENV"
+      - name: Validate credentials
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
+            test -n "${!name}" || { echo "::error::Missing secret $name"; exit 1; }
+          done
+          test "$APPLE_TEAM_ID" = "$TEAM_IDENTIFIER"
+      - name: Choose release version
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+          tags=subprocess.check_output(["git","tag","--list","v*"],text=True).splitlines()
+          versions=[tuple(map(int,t[1:].split("."))) for t in tags if re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",t)]
+          latest=max(versions) if versions else None
+          version=os.environ.get("REQUESTED_VERSION","").strip()
+          if not version:
+              version=".".join(map(str,(*latest[:2],latest[2]+1))) if latest else os.environ["DEFAULT_APP_VERSION"]
+          assert re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",version)
+          assert not latest or tuple(map(int,version.split("."))) > latest
+          with open(os.environ["GITHUB_ENV"],"a") as out:
+              out.write(f"APP_VERSION={version}\nAPP_BUILD_NUMBER={int(os.environ['GITHUB_RUN_NUMBER'])+19}\n")
+          PY
+      - name: Test and audit updater
+        run: |
+          swift --version
+          swift test --scratch-path .build/ci-tests
+          bash scripts/audit-macos-updater.sh
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+      - name: Import exact Developer ID identity
+        id: signing
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          certificate="$RUNNER_TEMP/macpurge.p12"
+          keychain="$RUNNER_TEMP/macpurge.keychain-db"
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$certificate"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security import "$certificate" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain" >/dev/null 2>&1
+          identity="$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application:.*\(66K3EFBVB6\)/ {print $2; exit}')"
+          test -n "$identity"
+          echo "CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          rm "$certificate"
+      - name: Build universal hardened app
+        run: scripts/build-app.sh
+      - name: Notarize app and designed DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          # build-app.sh uses --options runtime and codesign --verify, exact TeamIdentifier
+          # and designated requirements. notarize-release.sh runs notarytool submit,
+          # stapler validate, spctl --assess and shasum -a 256 for each signed artifact.
+          # APP_BUNDLE_NAME EXECUTABLE_NAME BUNDLE_IDENTIFIER TEAM_IDENTIFIER
+          # DMG_ASSET_NAME and MANIFEST_ASSET_NAME (.update.json) come from the contract.
+          scripts/notarize-release.sh
+      - name: Retain verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: macpurge-verified-release
+          path: .build/releases/v${{ env.APP_VERSION }}/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -f ".build/releases/v$APP_VERSION/$MANIFEST_ASSET_NAME"
+          git tag "v$APP_VERSION"
+          git push origin "v$APP_VERSION"
+          gh release create "v$APP_VERSION" \
+            ".build/releases/v$APP_VERSION/$DMG_ASSET_NAME" \
+            ".build/releases/v$APP_VERSION/$MANIFEST_ASSET_NAME" \
+            --repo "$GITHUB_OWNER/$GITHUB_REPO" --verify-tag \
+            --title "$APP_NAME $APP_VERSION" --notes-file docs/releases/latest.md
+      - name: Remove signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/macpurge.keychain-db" >/dev/null 2>&1 || true

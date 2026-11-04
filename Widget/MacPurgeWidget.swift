@@ -26,16 +26,16 @@ struct DiskProvider: TimelineProvider {
         if let reading = entry.snapshot {
           Text(reading.free.map { $0.formatted(.byteCount(style: .file)) } ?? "—").font(
             .title.bold())
-          Text("Boş alan").font(.caption)
+          Text("Free space").font(.caption)
           Text(reading.date, style: .relative).font(.caption2).foregroundStyle(.secondary)
         } else {
-          Text("MacPurge’de bir tarama başlat.").font(.callout)
+          Text("Run a scan in MacPurge.").font(.callout)
         }
       }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .containerBackground(for: .widget) {
           Color(red: 0.12, green: 0.34, blue: 0.31).opacity(0.22)
         }
-    }.configurationDisplayName("Disk özeti").description("MacPurge’ün son tamamlanan ölçümü.")
+    }.configurationDisplayName("Disk summary").description("Results from the last completed MacPurge scan.")
       .supportedFamilies([.systemSmall, .systemMedium])
   }
 }

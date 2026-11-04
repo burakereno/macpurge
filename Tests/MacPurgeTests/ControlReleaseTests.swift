@@ -31,7 +31,9 @@ struct ControlReleaseTests {
           cache.id: first, project.id: RootSize(bytes: 32_000_000, measuredDevice: 3),
           second.id: RootSize(bytes: 40_000_000, measuredDevice: 4),
         ], disk: nil, extended: true, homeDevice: 3)
-      let selected = report.plan(target: 20_000_000)
+      let selected = report.plan(
+        target: 20_000_000,
+        moveStates: Dictionary(uniqueKeysWithValues: report.items.map { ($0.id, .ready) }))
       #expect(selected.map(\.name) == ["dependency"])
       #expect(selected.first?.eligibleBytes == 6_000_000)
       let redacted = String(decoding: try report.export(), as: UTF8.self)
@@ -74,13 +76,35 @@ struct ControlReleaseTests {
     }
   }
 
+  @Test func dockerUsagePartitionsActualTotalsForLegacyAndCurrentEngines() throws {
+    let socket = URL(fileURLWithPath: "/test/socket")
+    let current =
+      #"{"ImageUsage":{"TotalSize":1000,"Reclaimable":0,"Items":[{"Id":"a","Size":800,"SharedSize":200}]},"ContainerUsage":{"TotalSize":40,"Items":[{"ImageID":"a","SizeRw":40,"Labels":{"com.docker.compose.project":"app","com.docker.compose.project.working_dir":"/p"}}]},"VolumeUsage":{"TotalSize":200,"Items":[{"Name":"v","Labels":{"com.docker.compose.project":"app"},"UsageData":{"RefCount":1,"Size":50}}]},"BuildCacheUsage":{"TotalSize":10}}"#
+    let legacy =
+      #"{"LayersSize":1000,"Containers":[{"ImageID":"b","SizeRw":40}],"Volumes":[{"Name":"v","UsageData":{"Size":200}}],"BuildCache":[{"Size":90,"Shared":true},{"Size":10,"Shared":false}]}"#
+    for json in [current, legacy] {
+      let rows = try ComposeInventory.rows(data: Data(json.utf8), socket: socket)
+      let sizes = rows.compactMap { row -> Int64? in
+        if case .report(let n) = row.source { return n }
+        return nil
+      }
+      #expect(sizes.reduce(0, +) == 1250)
+      #expect(rows.count == sizes.count)
+      if json == current {
+        #expect(rows.first { $0.title == "Compose · app" }?.source == .report(600))
+        #expect(rows.first { $0.title == "Docker · Images" }?.source == .report(400))
+      }
+    }
+  }
+
   @Test func composeSharesAreNotAssignedToTheWrongProject() throws {
     let json =
       #"{"Images":[{"Id":"a","Size":100,"SharedSize":90},{"Id":"b","Size":200,"SharedSize":30}],"Containers":[{"ImageID":"a","Labels":{"com.docker.compose.project":"one","com.docker.compose.project.working_dir":"/test/one"}},{"ImageID":"a","Labels":{"com.docker.compose.project":"two","com.docker.compose.project.working_dir":"/test/two"}},{"ImageID":"b","Labels":{"com.docker.compose.project":"two","com.docker.compose.project.working_dir":"/test/two"}}]}"#
     let rows = try ComposeInventory.rows(
       data: Data(json.utf8), socket: URL(fileURLWithPath: "/test/socket"))
-    #expect(rows.count == 1 && rows.first?.source == .report(170))
-    #expect(rows.first?.title.contains("two") == true)
+    let compose = rows.filter { $0.title.hasPrefix("Compose") }
+    #expect(compose.count == 1 && compose.first?.source == .report(170))
+    #expect(compose.first?.title.contains("two") == true)
   }
 
   @Test func ollamaSharedBlobsAreCountedOnlyOnce() async throws {

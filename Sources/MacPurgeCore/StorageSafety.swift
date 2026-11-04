@@ -10,11 +10,18 @@ package struct SafetyAssessment: Equatable, Sendable {
 
 /// Catalog rules describe the whole measured root, including mixed-use folders.
 /// A path selected by the user does not inherit a tool's rule based on its name.
-package enum StorageProfile: Sendable {
+package enum StorageProfile: String, Codable, Sendable {
   case npmCache, goBuildCache, xcodeWorkspace, packageDownloads, sharedDependencies, uvCache,
-    project, unknown
+    project, projectOutput, projectCache, projectBuild, projectGradleCache, gradleCache, unknown
   case simulatorCache, simulatorData, xcodeIntermediate, verifiedDownloads, unrecognizedDownloads
   case logs, personal, systemManaged, renderCache
+
+  package static let gradleCacheReason =
+    "Gradle önbelleği. Silince sonraki derlemede yeniden oluşur. Gerekli bağımlılıklar tekrar indirilir."
+
+  package var isProjectOutput: Bool {
+    self == .projectOutput || self == .projectCache || self == .projectBuild || self == .projectGradleCache
+  }
 
   package func assessment(for state: ReadState?) -> SafetyAssessment? {
     switch state {
@@ -75,6 +82,16 @@ package enum StorageProfile: Sendable {
         reason:
           "uv ortamları önbellekteki dosyalara bağlantı verebilir. Kaldırmak bu ortamları etkileyebilir."
       )
+    case .gradleCache, .projectGradleCache:
+      return .init(level: .safe, reason: Self.gradleCacheReason)
+    case .projectCache:
+      return .init(level: .safe,
+        reason: "Proje önbelleği. Silince yeniden oluşur. İlk açılış veya derleme daha uzun sürebilir.")
+    case .projectBuild:
+      return .init(level: .safe,
+        reason: "Derleme ara çıktıları. Sonraki derlemede yeniden oluşur. Kaynak kodu korunur.")
+    case .projectOutput:
+      return .init(level: .review, reason: "Temizlemeden önce projeyi kullanan araçları kapat ve klasörü incele.")
     case .project:
       return .init(
         level: .review,

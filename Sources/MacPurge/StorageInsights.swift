@@ -9,11 +9,15 @@ struct FileAgeView: View {
   let age: FileAgeBreakdown
   let partial: Bool
   var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      LabeledContent("Son 72 saatte değişen", value: size(age.recent))
-      LabeledContent("72 saatten eski", value: size(age.older))
+    VStack(alignment: .leading, spacing: 0) {
+      InventoryRows([("Son 72 saatte değişen", age.recent), ("72 saatten eski", age.older)],
+        id: \.0) { title, bytes in
+        InventoryReadout(title: ReviewLanguage.text(title), amount: size(bytes), symbol: "clock")
+      }
       if partial {
         Text("Yalnızca okunabilen dosyalar dahil.").font(.caption).foregroundStyle(.secondary)
+          .padding(.leading, InventoryLayout.detailIndent)
+          .padding(.vertical, InventoryLayout.verticalPadding)
       }
     }.font(.callout)
   }
@@ -21,7 +25,9 @@ struct FileAgeView: View {
 }
 
 struct WeeklyGrowthView: View {
+  let scan: LiveScan
   let report: ScanReport
+  @Binding var selected: Set<String>
   @State private var trend: WeeklyGrowth?
   @State private var failure: String?
 
@@ -36,7 +42,7 @@ struct WeeklyGrowthView: View {
           .font(.callout).foregroundStyle(.secondary)
         } else {
           Text(
-            "\(trend.start.formatted(date: .abbreviated, time: .omitted)) – \(trend.end.formatted(date: .abbreviated, time: .omitted)) · \(trend.measuredDays) ölçüm günü"
+            "\(trend.start.reviewDate(date: .abbreviated, time: .omitted)) – \(trend.end.reviewDate(date: .abbreviated, time: .omitted)) · \(trend.measuredDays) ölçüm günü"
           )
           .font(.caption).foregroundStyle(.secondary)
           if trend.comparableCategories == 0 {
@@ -44,17 +50,12 @@ struct WeeklyGrowthView: View {
           } else if trend.categories.isEmpty {
             Text("Karşılaştırılabilen kategorilerde net büyüme yok.").font(.callout)
           }
-          ForEach(trend.categories.prefix(5)) { category in
-            Surface {
-              VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                  Text(
-                    ReviewLanguage.text(
-                      ScanGroup(rawValue: category.name)?.titleKey ?? category.name)
-                  ).font(.headline)
-                  Spacer()
-                  Text("+" + byteLabel(category.change)).monospacedDigit()
-                }
+          InventoryList(Array(trend.categories.prefix(5))) { category in
+              VStack(alignment: .leading, spacing: 0) {
+                let group = ScanGroup(rawValue: category.name)
+                InventoryReadout(title: ReviewLanguage.text(group?.titleKey ?? category.name),
+                  amount: "+" + byteLabel(category.change), symbol: group?.symbol ?? "chart.bar",
+                  tint: group?.tint ?? Ink.sea)
                 Chart(category.samples) { point in
                   BarMark(
                     x: .value("Tarih", point.date, unit: .day),
@@ -67,26 +68,26 @@ struct WeeklyGrowthView: View {
                     .end ?? trend.end)
                 )
                 .chartYAxisLabel("GB").frame(height: 80)
+                  .padding(.horizontal, InventoryLayout.detailIndent)
+                  .padding(.vertical, InventoryLayout.verticalPadding)
                 if category.folders.isEmpty {
                   Text("Artış tek bir ölçülmüş klasöre bağlanamadı.").font(.caption)
                     .foregroundStyle(.secondary)
+                    .padding(.leading, InventoryLayout.detailIndent)
+                    .padding(.vertical, InventoryLayout.verticalPadding)
                 }
-                ForEach(category.folders) { folder in
-                  HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                      Text(folder.item.name)
-                      Text(folder.item.shortPath).font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
+                InventoryRows(category.folders) { folder in
+                    if scan.report?.id == report.id {
+                      InventoryMeasuredRow(scan: scan, item: folder.item, selected: $selected,
+                        amount: folder.item.bytes.map(byteLabel),
+                        delta: folder.firstSeen ? nil : folder.bytes)
+                    } else {
+                      InventoryReadout(title: folder.item.actionTitle,
+                        amount: (folder.firstSeen ? "" : "+") + byteLabel(folder.bytes),
+                        subtitle: folder.item.shortPath)
                     }
-                    Spacer()
-                    if folder.firstSeen {
-                      Text("İlk ölçüm").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text((folder.firstSeen ? "" : "+") + byteLabel(folder.bytes)).monospacedDigit()
-                  }.font(.callout)
-                }
-              }.padding(12)
-            }
+                }.padding(.leading, InventoryLayout.nestedIndent)
+              }
           }
         }
       } else if let failure {

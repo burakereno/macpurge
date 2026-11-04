@@ -4,16 +4,18 @@ import SwiftUI
   import MacPurgeCore
 #endif
 
-enum LiveSection: Hashable { case overview, storage, projects, plan, activity }
+enum LiveSection: Hashable { case overview, storage, projects, plan, activity, settings }
 
 struct LiveWorkspace: View {
-  @Environment(\.openWindow) private var openWindow
   @Environment(\.scenePhase) private var scenePhase
   let scan: LiveScan
   @Binding var section: LiveSection
   @State private var selectedIDs: Set<String> = []
+  @State private var showsMoveResult = false
+  @State private var storageRoute = StorageRoute()
 
   var body: some View {
+    @Bindable var cleanup = scan.cleanup
     NavigationSplitView {
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 9) {
@@ -34,164 +36,276 @@ struct LiveWorkspace: View {
         }.listStyle(.sidebar)
         Label("Önizlemeli temizlik", systemImage: "checkmark.shield")
           .font(.callout.weight(.medium)).foregroundStyle(.secondary)
-          .padding(.leading, 18).padding(.bottom, 19)
+          .padding(.leading, 18).padding(.bottom, 8)
+        SettingsSidebarFooter(selected: section == .settings) { section = .settings }
       }
       .navigationSplitViewColumnWidth(min: 165, ideal: 194, max: 230)
     } detail: {
       Group {
         switch section {
-        case .overview: LiveOverview(scan: scan, openStorage: { section = .storage })
+        case .settings: ControlSettings(scan: scan)
+        case .overview:
+          LiveOverview(scan: scan, selected: $selectedIDs) {
+            storageRoute = StorageRoute()
+            section = .storage
+          }
         case .storage:
-          StorageBrowser(scan: scan, selected: $selectedIDs, openPlan: { section = .plan })
-        case .projects:
-          ProjectRootsView(scan: scan) { item in
-            selectedIDs.insert(item.id)
+          StorageBrowser(scan: scan, selected: $selectedIDs, route: $storageRoute) {
             section = .plan
           }
+        case .projects:
+          ProjectRootsView(scan: scan)
         case .plan: SpacePreview(scan: scan, selected: $selectedIDs)
-        case .activity: ScanActivity(scan: scan)
+        case .activity: ScanActivity(scan: scan, selected: $selectedIDs)
         }
       }
-      .navigationTitle("MacPurge")
+      .navigationTitle(section == .settings ? Text("Ayarlar") : Text("MacPurge"))
       .toolbar {
-        ToolbarItemGroup(placement: .primaryAction) {
-          Button(action: scan.chooseProjects) {
-            Label("Proje klasörü seç", systemImage: "folder.badge.plus")
+        if section != .settings {
+          ToolbarItemGroup(placement: .primaryAction) {
+            Button(action: scan.chooseProjects) {
+              Label("Proje klasörü seç", systemImage: "folder.badge.plus")
+            }
+            .help("Ölçülecek proje klasörlerini seç")
+            if scan.phase == .running {
+              Button(action: scan.cancel) { Label("Taramayı durdur", systemImage: "stop.circle") }
+                .help("Taramayı durdur")
+            } else {
+              Button(action: scan.start) { Label("Yeniden tara", systemImage: "arrow.clockwise") }
+                .help("Tüm konumları yeniden ölç")
+            }
+            Menu {
+              Button("Hızlı tarama", action: scan.startQuick)
+              Button("Ayrıntılı tarama", action: scan.startDetailed)
+              Divider()
+              Button("JSON dışa aktar…", action: scan.exportReport).disabled(scan.report == nil)
+            } label: {
+              Label("Tarama kapsamı", systemImage: "slider.horizontal.3")
+            }
+            .help("Tarama kapsamı")
           }
-          .help("Ölçülecek proje klasörlerini seç")
-          if scan.phase == .running {
-            Button(action: scan.cancel) { Label("Taramayı durdur", systemImage: "stop.circle") }
-              .help("Taramayı durdur")
-          } else {
-            Button(action: scan.start) { Label("Yeniden tara", systemImage: "arrow.clockwise") }
-              .help("Tüm konumları yeniden ölç")
-          }
-          Menu {
-            Button("Hızlı tarama", action: scan.startQuick)
-            Button("Ayrıntılı tarama", action: scan.startDetailed)
-            Divider()
-            Button("JSON dışa aktar…", action: scan.exportReport).disabled(scan.report == nil)
-          } label: {
-            Label("Tarama kapsamı", systemImage: "slider.horizontal.3")
-          }
-          .help("Tarama kapsamı")
         }
       }
     }
-    .tint(Ink.sea)
-    .onAppear {
-      NoticeDelegate.showActivity = {
-        section = .activity
-        openWindow(id: "workspace")
-        NSApp.activate(ignoringOtherApps: true)
+    .sheet(item: $cleanup.preview) { plan in TrashPreviewSheet(plan: plan, scan: scan) }
+    .sheet(item: $cleanup.permanentReview) { review in PermanentCleanupSheet(review: review, scan: scan) }
+    .safeAreaInset(edge: .bottom) {
+      if section != .plan && cleanup.permanentReview == nil && (cleanup.busy || showsMoveResult) {
+        HStack {
+          if cleanup.busy {
+            ProgressView().controlSize(.small)
+            Text(
+              ReviewLanguage.text(
+                cleanup.applying ? "Çöp’e taşınıyor…" : "Seçilen klasörler doğrulanıyor…"))
+            Button("Durdur") { cleanup.cancel() }
+          } else if let result = cleanup.outcome {
+            Text(
+              ReviewLanguage.format("Çöp’e taşınan: %lld öğe · %@", Int64(result.moved.count),
+                ReviewLanguage.format("Tahmini kazanım: %@",
+                  byteLabel(result.moved.reduce(0) { $0 + $1.expectedRecoveryBytes })))
+            )
+            Spacer()
+            Button("Son işlem") {
+              section = .plan
+              showsMoveResult = false
+            }
+            Button {
+              showsMoveResult = false
+            } label: {
+              Image(systemName: "xmark")
+            }.help("Bitti")
+          }
+        }.font(.callout).padding(8).frame(maxWidth: .infinity).background(.bar)
       }
+    }
+    .onChange(of: scan.report?.id) {
+      if scan.phase == .finished, let report = scan.report {
+        let known = Set(report.items.map(\.id))
+        selectedIDs.formIntersection(known)
+      }
+    }
+    .onChange(of: cleanup.outcome?.id) {
+      if let result = cleanup.outcome {
+        selectedIDs.subtract(result.completedItems)
+        showsMoveResult = section != .plan
+      }
+    }
+    .tint(Ink.sea)
+    .onChange(of: section) {
+      if section != .storage { storageRoute = StorageRoute() }
     }
     .task { if scan.phase == .idle { scan.start() } }
     .task(id: eligibilityRequest) {
       guard eligibilityRequest != nil else { return }
       await scan.refreshMoveStates()
-      if !Task.isCancelled, !scan.moveStates.isEmpty {
-        selectedIDs = selectedIDs.filter {
-          scan.moveStates[$0] == .ready && !scan.hiddenIDs.contains($0)
+      if !Task.isCancelled, !scan.actions.isEmpty {
+        if let report = scan.report {
+          selectedIDs = Set(scan.explicitSelection(selectedIDs, in: report).map(\.id))
         }
       }
     }
+    .task(id: inUseIDs) {
+      let ids = inUseIDs
+      guard !ids.isEmpty else { return }
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(12)) } catch { return }
+        if !scan.cleanup.busy { await scan.refreshMoveStates(only: ids) }
+      }
+    }
+  }
+  private var inUseIDs: Set<String> {
+    guard eligibilityRequest != nil else { return [] }
+    return Set(scan.actions.compactMap { id, action in
+      if case .inUse = action.availability { id } else { nil }
+    })
   }
   private var eligibilityRequest: UUID? {
-    guard [.storage, .projects, .plan].contains(section), scan.phase == .finished,
+    guard scan.phase == .finished,
       scenePhase == .active
     else { return nil }
-    return scan.report?.id
+    return scan.inventoryID
   }
+}
+
+private struct OverviewCleanupSection: Identifiable {
+  let group: ScanGroup
+  let items: [ReportItem]
+  let cleanable: [ReportItem]
+  let bytes: Int64
+  var id: ScanGroup { group }
 }
 
 private struct LiveOverview: View {
   let scan: LiveScan
+  @Binding var selected: Set<String>
   let openStorage: () -> Void
   @Environment(\.colorScheme) private var scheme
-  @State private var expanded: Set<ScanGroup> = [.projects]
 
   var body: some View {
+    let rows = scan.overviewCandidates
+    let byCategory = Dictionary(grouping: rows, by: \.category)
+    let groups = ScanGroup.allCases.compactMap { group -> OverviewCleanupSection? in
+      guard let items = byCategory[group.rawValue] else { return nil }
+      let cleanable = scan.distinctCleanups(items)
+      let bytes = scan.cleanupBytes(cleanable)
+      return OverviewCleanupSection(group: group, items: items, cleanable: cleanable, bytes: bytes)
+    }.sorted { lhs, rhs in
+      lhs.bytes == rhs.bytes ? lhs.group.rawValue < rhs.group.rawValue : lhs.bytes > rhs.bytes
+    }
+    let rootsByID = groups.isEmpty ? [:] : Dictionary(scan.roots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     Page {
-      PageTitle(
-        kicker: "Çalışma alanı", title: "Genel bakış",
-        subtitle: "Mac’indeki araçların, uygulamaların ve seçtiğin projelerin depolama ölçümleri.")
+      HStack {
+        PageTitle(kicker: "Çalışma alanı", title: "Genel bakış",
+          subtitle: "Items you can clean up and how much space they use.")
+        Spacer(minLength: 4)
+        SafeTrashButton(scan: scan, items: rows.filter { scan.action(for: $0).risk == .safe })
+      }
       if let disk = scan.volume {
-        DiskView(reading: disk)
+        DiskView(reading: disk, safeBytes: safeCleanupBytes(rows))
       } else if scan.phase == .finished {
         Note(symbol: "internaldrive", text: "Disk kapasitesi okunamadı.")
       }
+      if let report = scan.report, !rows.isEmpty {
+        OverviewHighlights(scan: scan, report: report, items: Array(scan.distinctCleanups(rows).prefix(OverviewCategory.previewLimit)),
+          previous: report.previous(in: scan.history), selected: $selected)
+      }
       VStack(alignment: .leading, spacing: 12) {
-        if let report = scan.report {
-          OverviewHighlights(
-            report: report,
-            previous: report.previous(in: scan.history),
-            openStorage: openStorage)
-        }
         HStack(spacing: 12) {
-          SectionHead(title: "Ölçülen alanlar")
-          ForEach(SafetyLevel.allCases, id: \.self) { level in
-            Label(ReviewLanguage.text(level.rawValue), systemImage: level.symbol)
-              .font(.caption.weight(.semibold)).foregroundStyle(level.color(in: scheme))
-              .fixedSize()
+          SectionHead(title: "Temizlenebilir alanlar")
+          if !rows.isEmpty {
+            ForEach(SafetyLevel.allCases, id: \.self) { level in
+              Label(ReviewLanguage.text(level.rawValue), systemImage: level.symbol)
+                .font(.caption.weight(.semibold)).foregroundStyle(level.color(in: scheme))
+                .fixedSize()
+            }
           }
         }
-        ScanStatus(scan: scan)
-        Surface {
-          VStack(alignment: .leading, spacing: 0) {
-            ForEach(visibleGroups, id: \.self) { group in
-              ScanGroupView(
-                group: group, scan: scan,
-                isExpanded: Binding(
-                  get: { expanded.contains(group) },
-                  set: { if $0 { expanded.insert(group) } else { expanded.remove(group) } }
-                ))
-              if group != visibleGroups.last { Divider().padding(.leading, 32) }
-            }
-          }.padding(.horizontal, SurfaceCorners.rowInset)
+        HStack {
+          ScanStatus(scan: scan).frame(maxWidth: .infinity, alignment: .leading)
+          let choices = rows.filter { selected.contains($0.id) && scan.listMoveState($0) == .ready }
+          if !choices.isEmpty {
+            Text(scan.selectionLabel(scan.distinctMoves(choices))).font(.callout.monospacedDigit())
+            Button("Seçilenleri Çöp’e taşı…") {
+              scan.cleanup.prepare(choices, scan: scan, explicit: true)
+            }.controlSize(.small).disabled(scan.cleanup.busy)
+          }
         }
+        if !groups.isEmpty {
+          InventoryList(groups) { section in
+            ScanGroupView(section: section, scan: scan, rootsByID: rootsByID, selected: $selected)
+          }
+        } else if scan.phase == .finished {
+          let checking = scan.actions.isEmpty && scan.report?.items.isEmpty == false
+          Note(symbol: checking ? "clock" : "checkmark.circle",
+            text: checking ? "Kontrol ediliyor…" : "Şu anda Çöp’e taşınabilecek bir öğe yok.")
+        }
+        Button("Tüm ölçümleri Depolama’da gör", action: openStorage).buttonStyle(.link)
         if let note = scan.selectionNote { Note(symbol: "folder", text: note) }
-        Text(
-          "Boyutlar diskte ayrılan alanı gösterir. Bir klasör birden fazla grubun kapsamında olabilir."
-        )
-        .font(.caption).foregroundStyle(.secondary)
       }
     }
   }
-  private var visibleGroups: [ScanGroup] {
-    if scan.detailed { return ScanGroup.allCases }
-    return ScanGroup.allCases.filter { group in
-      [.xcode, .simulators, .packages, .projects, .logs].contains(group)
-        || scan.roots.contains(where: { $0.group == group })
-    }
+
+  private func safeCleanupBytes(_ rows: [ReportItem]) -> Int64? {
+    guard scan.phase == .finished, let report = scan.report,
+      report.items.allSatisfy({ scan.hiddenIDs.contains($0.id) || scan.actions[$0.id] != nil })
+    else { return nil }
+    return scan.cleanupBytes(scan.safeMoves(rows))
   }
 }
 
-private struct ScanStatus: View {
+struct ScanStatus: View {
   let scan: LiveScan
   var body: some View {
-    HStack(spacing: 8) {
-      if scan.phase == .running {
-        ProgressView().controlSize(.small)
-      } else {
+    if scan.phase == .running {
+      switch scan.progressStage {
+      case .discovering:
+        progressBar("Konumlar aranıyor…")
+      case .measuring(let title, let start, let total):
+        let completed = min(total, max(0, scan.results.count - start))
+        progressBar(
+          title, detail: scan.activeRoot?.displayTitle, count: "\(completed)/\(total)",
+          fraction: total > 0 ? Double(completed) / Double(total) : nil)
+      case .finishing:
+        progressBar("Sonuçlar hazırlanıyor…")
+      }
+    } else {
+      HStack(spacing: 8) {
         Image(systemName: scan.phase == .finished ? "checkmark.circle" : "pause.circle")
-      }
-      switch scan.phase {
-      case .idle: Text("Tarama hazırlanıyor")
-      case .running:
-        Text(
-          "\(scan.results.count)/\(scan.roots.count) konum · \(scan.activeRoot?.title ?? "Hazırlanıyor")"
-        )
-      case .cancelled:
-        Text("Durduruldu · \(scan.results.count)/\(scan.roots.count) konum tamamlandı")
-      case .finished:
-        if let date = scan.measuredAt {
-          Text(
-            "Son ölçüm \(date.formatted(date: .omitted, time: .shortened)) · \(scan.results.count) konum kontrol edildi"
-          )
+        switch scan.phase {
+        case .idle: Text("Tarama hazırlanıyor")
+        case .cancelled:
+          Text("Durduruldu · \(scan.results.count)/\(scan.roots.count) konum tamamlandı")
+        case .finished:
+          if let date = scan.measuredAt {
+            Text("Son ölçüm \(date.reviewDate(date: .omitted, time: .shortened)) · \(scan.results.count) konum kontrol edildi")
+          }
+        case .running: EmptyView()
         }
-      }
-    }.font(.callout).foregroundStyle(.secondary)
+      }.font(.callout).foregroundStyle(.secondary)
+    }
+  }
+
+  private func progressBar(
+    _ title: String, detail: String? = nil, count: String? = nil, fraction: Double? = nil
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+      HStack(spacing: 7) {
+        Text(ReviewLanguage.text(title)).fontWeight(.medium)
+        if let detail {
+          Text("·").foregroundStyle(.secondary).accessibilityHidden(true)
+          Text(ReviewLanguage.text(detail)).foregroundStyle(.secondary)
+            .lineLimit(1).truncationMode(.middle)
+        }
+        Spacer(minLength: 4)
+        if let count {
+          Text(verbatim: count).monospacedDigit().foregroundStyle(.secondary).fixedSize()
+        }
+      }.font(.callout)
+      ProgressView(value: fraction)
+        .progressViewStyle(.linear)
+        .tint(Ink.sea)
+        .accessibilityLabel(ReviewLanguage.text(title))
+    }
   }
 }
 
@@ -246,307 +360,43 @@ extension ScanGroup {
   }
 }
 
-private struct DisclosureRowStyle: ButtonStyle {
-  let compact: Bool
-  let isHovered: Bool
-
-  func makeBody(configuration: Configuration) -> some View {
-    let hoverOpacity = isHovered ? 0.05 : 0
-    return configuration.label.background {
-      RoundedRectangle(cornerRadius: compact ? 6 : SurfaceCorners.rowRadius, style: .continuous)
-        .fill(Color.primary.opacity(configuration.isPressed ? 0.08 : hoverOpacity))
-        .padding(.vertical, compact ? 0 : SurfaceCorners.rowInset)
-    }
-  }
-}
-
-private struct OverviewDisclosure<Content: View, RowLabel: View>: View {
-  @Binding var isExpanded: Bool
-  var compact = false
-  @ViewBuilder let content: Content
-  @ViewBuilder let label: RowLabel
-  @State private var hovering = false
-  @FocusState private var focused: Bool
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      Button {
-        focused = true
-        isExpanded.toggle()
-      } label: {
-        HStack(spacing: 7) {
-          Image(systemName: isExpanded ? "chevron.down" : "chevron.forward")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(hovering || focused ? .primary : .secondary)
-            .frame(width: 12).accessibilityHidden(true)
-          label
-        }
-        .padding(.horizontal, 9).padding(.vertical, compact ? 5 : 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-      }
-      .buttonStyle(DisclosureRowStyle(compact: compact, isHovered: hovering))
-      .focusable()
-      .focusEffectDisabled()
-      .focused($focused)
-      .onHover { hovering = $0 }
-      .onKeyPress(.rightArrow) {
-        isExpanded = true
-        return .handled
-      }
-      .onKeyPress(.leftArrow) {
-        isExpanded = false
-        return .handled
-      }
-      .accessibilityRepresentation {
-        DisclosureGroup(isExpanded: $isExpanded) {
-          EmptyView()
-        } label: {
-          label.accessibilityElement(children: .combine)
-        }
-      }
-      if isExpanded { content }
-    }
-  }
-}
-
 private struct ScanGroupView: View {
-  let group: ScanGroup
+  let section: OverviewCleanupSection
   let scan: LiveScan
-  @Binding var isExpanded: Bool
-
-  var roots: [ScanRoot] {
-    let members = scan.roots.filter {
-      guard $0.group == group else { return false }
-      if group == .other, let result = scan.results[$0.id], result.state == .complete {
-        return result.bytes >= 500 * 1024 * 1024
-      }
-      return true
-    }
-    guard group == .simulators, scan.phase == .finished else { return members }
-    return members.sorted { lhs, rhs in
-      let left = scan.results[lhs.id]?.bytes ?? 0
-      let right = scan.results[rhs.id]?.bytes ?? 0
-      return left != right ? left > right : (lhs.title, lhs.id) < (rhs.title, rhs.id)
-    }
-  }
-  private var counts: [SafetyLevel: Int] {
-    let levels = roots.flatMap { root in
-      let profiles: [StorageProfile] =
-        root.device == nil
-        ? [root.effectiveProfile(scan.results[root.id])] : [.simulatorCache, .simulatorData]
-      return profiles.compactMap { $0.assessment(for: scan.results[root.id]?.state)?.level }
-    }
-    return levels.reduce(into: [:]) { $0[$1, default: 0] += 1 }
-  }
-  var summary: String {
-    if group == .simulators && roots.isEmpty {
-      guard let inventory = scan.simulatorInventory else {
-        return scan.phase == .running ? "Aranıyor…" : "Ölçülmedi"
-      }
-      return inventory.note == nil ? "Cihaz yok" : "Okunamadı"
-    }
-    guard !roots.isEmpty else {
-      if group == .projects { return "Seçilmedi" }
-      return scan.phase == .finished ? "Kayıt bulunamadı" : "Bekleniyor"
-    }
-    let sizes = roots.compactMap { scan.results[$0.id] }
-    if let bytes = scan.groupBytes[group] {
-      let incomplete =
-        sizes.count != roots.count
-        || sizes.contains { $0.state != .complete && $0.state != .absent }
-        || (group == .simulators && scan.simulatorInventory?.note != nil)
-      return (incomplete ? "≥ " : "") + byteLabel(bytes)
-    }
-    if scan.activeRoot?.group == group { return "Ölçülüyor…" }
-    if sizes.count < roots.count { return "Ölçülmedi" }
-    return sizes.allSatisfy { $0.state == .absent } ? "Bulunamadı" : "Okunamadı"
-  }
+  let rootsByID: [String: ScanRoot]
+  @Binding var selected: Set<String>
+  @State private var isExpanded = false
+  @State private var showAll = false
 
   var body: some View {
-    OverviewDisclosure(isExpanded: $isExpanded) {
-      VStack(alignment: .leading, spacing: 10) {
-        if group == .projects && roots.isEmpty {
-          Button("Proje klasörü seç…", action: scan.chooseProjects)
-        } else {
-          if group == .simulators {
-            if let note = scan.simulatorInventory?.note { Note(symbol: "info.circle", text: note) }
-            if !roots.isEmpty {
-              Text(
-                "\(roots.filter { $0.device != nil }.count) cihaz · Paylaşılan runtime imajları cihaz boyutlarının dışındadır."
-              )
-              .font(.caption).foregroundStyle(.secondary)
-            }
-          }
-          ForEach(roots) { root in
-            if let device = root.device {
-              SimulatorRow(device: device, root: root, scan: scan)
-              if root.id != roots.last?.id { Divider() }
-            } else {
-              MeasuredRoot(root: root, scan: scan)
-            }
-          }
+    let group = section.group
+    let items = section.items
+    let cleanable = section.cleanable
+    let eligible = cleanable.filter { scan.listMoveState($0) == .ready }
+    let counts = Dictionary(grouping: cleanable.compactMap { scan.action(for: $0).risk }, by: { $0 }).mapValues(\.count)
+    InventoryDisclosure(
+      isExpanded: $isExpanded, selectable: eligible, selected: $selected, busy: scan.cleanup.busy
+    ) {
+      VStack(alignment: .leading, spacing: 0) {
+        InventoryRows(Array(showAll ? items[...] : items.prefix(OverviewCategory.previewLimit))) { item in
+          InventoryMeasuredRow(scan: scan, item: item, selected: $selected,
+            root: rootsByID[item.category + "|" + item.path], amount: byteLabel(scan.action(for: item).bytes))
         }
-      }.padding(.leading, 29).padding(.trailing, 8).padding(.bottom, 8)
+        if items.count > OverviewCategory.previewLimit {
+          Button(showAll ? "Daha az göster" : "Tümünü göster") { showAll.toggle() }
+            .buttonStyle(.link).padding(InventoryLayout.verticalPadding)
+        }
+      }
     } label: {
-      ScanGroupHeader(group: group, counts: counts, summary: summary)
-    }
-  }
-}
-
-private struct ScanGroupHeader: View {
-  let group: ScanGroup
-  let counts: [SafetyLevel: Int]
-  let summary: String
-  @ScaledMetric(relativeTo: .headline) private var sizeColumnWidth: CGFloat = 108
-
-  var body: some View {
-    HStack(spacing: 11) {
-      Image(systemName: group.symbol)
-        .font(.system(size: 16, weight: .medium)).foregroundStyle(group.tint)
-        .frame(width: 22).accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 3) {
-        Text(ReviewLanguage.text(group.titleKey)).font(.headline)
-        Text(ReviewLanguage.text(group.detail)).font(.caption).foregroundStyle(.secondary)
-      }
-      .lineLimit(1)
-      .help(ReviewLanguage.text(group.detail))
-      .frame(maxWidth: .infinity, alignment: .leading)
-      if !counts.isEmpty {
-        HStack(spacing: 6) {
-          ForEach(SafetyLevel.allCases, id: \.self) { level in
-            if let count = counts[level] {
-              SafetyBadge(level: level, count: count)
-            }
-          }
-        }.fixedSize()
-      }
-      Text(ReviewLanguage.text(summary))
-        .font(.headline).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-        .frame(width: sizeColumnWidth, alignment: .trailing)
-    }
-  }
-}
-
-private struct SimulatorRow: View {
-  let device: SimulatorDevice
-  let root: ScanRoot
-  let scan: LiveScan
-
-  var body: some View {
-    let result = scan.results[root.id]
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(alignment: .firstTextBaseline) {
-        Text(device.name).font(.headline)
-        Spacer()
-        Text(ReviewLanguage.text(totalText(result))).font(.headline).monospacedDigit()
-      }
-      Text(device.detail).font(.caption).foregroundStyle(.secondary)
-        .help(root.url.path)
-      if let result, result.measured {
-        portion(
-          "Cihaz verileri", profile: .simulatorData, bytes: result.simulatorDataBytes,
-          state: result.state)
-        portion(
-          "Önbellek ve geçici dosyalar", profile: .simulatorCache,
-          bytes: result.simulatorCacheBytes, state: result.state)
-        if result.state == .partial {
-          Text("\(result.missed) girdi okunamadı. Boyutlar ölçülebilen kısmı gösterir.")
-            .font(.caption).foregroundStyle(.secondary)
+      InventoryGroupHeader(title: ReviewLanguage.text(group.titleKey), symbol: group.symbol,
+        tint: group.tint, amount: byteLabel(section.bytes)) {
+        ForEach(SafetyLevel.allCases, id: \.self) { level in
+          if let count = counts[level] { SafetyBadge(level: level, count: count) }
         }
-      }
-    }.padding(.vertical, 4)
-      .accessibilityElement(children: .contain)
-  }
-
-  private func totalText(_ result: RootSize?) -> String {
-    guard let result else { return scan.activeRoot == root ? "Ölçülüyor…" : "Ölçülmedi" }
-    switch result.state {
-    case .complete: return byteLabel(result.bytes)
-    case .partial: return "≥ " + byteLabel(result.bytes)
-    case .unavailable(let message): return message
-    case .absent: return "Bulunamadı"
+      }.help(ReviewLanguage.text(group.detail))
+    } accessory: {
+      CategoryMoveButton(scan: scan, group: group, items: items, eligible: eligible.count)
     }
-  }
-
-  private func portion(_ title: String, profile: StorageProfile, bytes: Int64, state: ReadState)
-    -> some View
-  {
-    let assessment = profile.assessment(for: state)
-    return HStack(alignment: .firstTextBaseline) {
-      Text(ReviewLanguage.text(title)).font(.callout)
-      if let assessment { SafetyBadge(level: assessment.level) }
-      Spacer()
-      Text(byteLabel(bytes)).font(.callout).monospacedDigit()
-    }
-    .padding(.leading, 10)
-    .help(ReviewLanguage.text(assessment?.reason ?? ""))
-    .accessibilityElement(children: .combine)
-    .accessibilityHint(assessment?.reason ?? "")
-  }
-}
-
-private struct MeasuredRoot: View {
-  let root: ScanRoot
-  let scan: LiveScan
-  @State private var expanded = false
-
-  var result: RootSize? { scan.results[root.id] }
-  var assessment: SafetyAssessment? { root.effectiveProfile(result).assessment(for: result?.state) }
-  var amount: String {
-    guard let result else { return scan.activeRoot == root ? "Ölçülüyor…" : "Ölçülmedi" }
-    switch result.state {
-    case .complete: return byteLabel(result.bytes)
-    case .partial: return "≥ " + byteLabel(result.bytes)
-    case .absent: return "Bulunamadı"
-    case .unavailable(let message): return message
-    }
-  }
-  var body: some View {
-    OverviewDisclosure(isExpanded: $expanded, compact: true) {
-      VStack(alignment: .leading, spacing: 5) {
-        Text(root.url.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-        if let usage = root.runtimeUsage {
-          RuntimeDetails(usage: usage)
-        } else if let result, result.measured {
-          if let age = result.age { FileAgeView(age: age, partial: result.state == .partial) }
-          Text("\(result.files) dosya ölçüldü").font(.caption)
-          if root.group == .projects {
-            Text(
-              "Bilinen çıktı klasörleri toplamın \(byteLabel(result.outputBytes)) kadarını oluşturuyor."
-            ).font(.caption)
-          }
-          if result.state == .partial {
-            Text("\(result.missed) girdi okunamadı. Gösterilen boyut alt sınırdır.").font(.caption)
-          }
-          ForEach(
-            result.largest.sorted { a, b in a.value == b.value ? a.key < b.key : a.value > b.value }
-              .prefix(5), id: \.key
-          ) { name, bytes in
-            HStack {
-              Text(name)
-              Spacer()
-              Text(byteLabel(bytes)).monospacedDigit()
-            }.font(.caption)
-          }
-        }
-      }.foregroundStyle(.secondary).padding(.leading, 28).padding(.bottom, 6)
-    } label: {
-      VStack(alignment: .leading, spacing: 4) {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
-          Text(ReviewLanguage.text(root.displayTitle)).font(.callout.weight(.medium))
-          if let assessment { SafetyBadge(level: assessment.level) }
-          Spacer(minLength: 2)
-          Text(ReviewLanguage.text(amount)).font(.callout).foregroundStyle(.secondary)
-            .monospacedDigit()
-        }
-        if let assessment {
-          Text(ReviewLanguage.text(assessment.reason)).font(.caption).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-      }
-    }
-    .padding(.vertical, 3)
   }
 }
 
@@ -563,6 +413,7 @@ extension SafetyLevel {
 struct SafetyBadge: View {
   let level: SafetyLevel
   var count: Int? = nil
+  var titleKey: String? = nil
   @Environment(\.colorScheme) private var scheme
 
   var body: some View {
@@ -572,7 +423,7 @@ struct SafetyBadge: View {
         let format = ReviewLanguage.text(
           level == .safe ? "%lld güvenli öğe" : "%lld öğe incelenmeli")
         return String(format: format, Int64(number))
-      } ?? ReviewLanguage.text(level.rawValue)
+      } ?? ReviewLanguage.text(titleKey ?? level.rawValue)
     HStack(spacing: 3) {
       Image(systemName: level.symbol)
       if let count {
@@ -588,120 +439,5 @@ struct SafetyBadge: View {
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(title)
     .help(title)
-  }
-}
-
-private struct ProjectRootsView: View {
-  let scan: LiveScan
-  let openPlan: (ReportItem) -> Void
-  @State private var cardMessage: String?
-  @State private var removableRoots: [URL]?
-  var body: some View {
-    Page {
-      PageTitle(
-        kicker: "Çalışma alanı", title: "Proje klasörleri",
-        subtitle:
-          "Seçilen her klasörün tamamı ölçülür. Bilinen derleme çıktıları ayrıca gösterilir.")
-      ViewThatFits(in: .horizontal) {
-        HStack {
-          MainAction(
-            title: "Proje klasörü seç…", symbol: "folder.badge.plus", action: scan.chooseProjects)
-          externalButton
-        }
-        VStack(alignment: .leading) {
-          MainAction(
-            title: "Proje klasörü seç…", symbol: "folder.badge.plus", action: scan.chooseProjects)
-          externalButton
-        }
-      }
-      if let removableRoots {
-        if removableRoots.isEmpty {
-          Note(
-            symbol: "externaldrive",
-            text: "Bağlı yerel disklerde standart bir proje klasörü bulunamadı.")
-        }
-        ForEach(removableRoots, id: \.path) { url in
-          Button("Taramaya ekle · \(url.path)") { scan.addProjects([url]) }
-            .disabled(scan.projects.contains(where: { $0.path == url.path }))
-        }
-      }
-      if let note = scan.selectionNote { Note(symbol: "folder", text: note) }
-      if scan.projects.isEmpty {
-        ContentUnavailableView(
-          "Henüz proje seçilmedi", systemImage: "folder",
-          description: Text("Ölçmek istediğin bir veya daha fazla klasör seç.")
-        )
-        .frame(maxWidth: .infinity).padding(.vertical, 16)
-      } else {
-        ScanStatus(scan: scan)
-        ForEach(scan.roots.filter { $0.group == .projects }) { root in
-          Surface {
-            VStack(alignment: .leading, spacing: 9) {
-              MeasuredRoot(root: root, scan: scan)
-              Text(root.url.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-              if let row = scan.results[root.id], row.measured {
-                if let date = row.sourceModified {
-                  LabeledContent(
-                    "Son kaynak değişikliği",
-                    value: date.formatted(date: .abbreviated, time: .shortened))
-                }
-                if let date = row.lastBuild {
-                  LabeledContent(
-                    "Son çıktı değişikliği",
-                    value: date.formatted(date: .abbreviated, time: .shortened))
-                }
-                ForEach(row.outputKinds.sorted { $0.value > $1.value }, id: \.key) { name, bytes in
-                  LabeledContent(name, value: byteLabel(bytes))
-                }
-                ForEach(scan.projectArtifacts.filter { $0.project.path == root.url.path }) {
-                  artifact in
-                  LabeledContent("Proje dışındaki DerivedData", value: byteLabel(artifact.bytes))
-                    .help(artifact.url.path)
-                }
-                ForEach(
-                  scan.report?.items.filter { item in
-                    guard let path = item.workspace else { return false }
-                    return ProjectAttribution.owningRoot(workspace: path, selected: scan.projects)?
-                      .path == root.url.path
-                  } ?? []
-                ) { output in
-                  HStack {
-                    Text(output.name)
-                    Spacer()
-                    Text(byteLabel(output.bytes ?? 0)).monospacedDigit()
-                    Button("Alan planına ekle") { openPlan(output) }
-                      .disabled(
-                        scan.moveStates[output.id] != .ready || scan.hiddenIDs.contains(output.id))
-                  }
-                  if case .blocked(let reason) = scan.moveStates[output.id] {
-                    Text(reason).font(.caption).foregroundStyle(.secondary)
-                  }
-                }
-                if let date = row.sourceModified, Date.now.timeIntervalSince(date) > 60 * 86400 {
-                  Note(
-                    symbol: "clock", text: "60 günden uzun süredir kaynak değişikliği görülmedi.")
-                }
-                if let date = row.lastBuild, Date.now.timeIntervalSince(date) < 7 * 86400 {
-                  Note(symbol: "hammer", text: "Bu proje son hafta derlendi.")
-                }
-                Button("İsimsiz özet kartını kopyala") {
-                  cardMessage =
-                    AnonymousCard.copy(bytes: row.bytes, build: row.outputBytes)
-                    ? "İsimsiz kart kopyalandı." : "Kart hazırlanamadı."
-                }
-              }
-              Button("Tarama listesinden çıkar") { scan.exclude(root.url) }
-                .controlSize(.small).help("Yalnızca tarama kapsamını değiştirir")
-            }.padding(15)
-          }
-        }
-        if let cardMessage { Text(cardMessage).font(.caption).foregroundStyle(.secondary) }
-      }
-    }
-  }
-  private var externalButton: some View {
-    Button("Harici disklerde proje klasörü bul") {
-      Task { removableRoots = await ExternalProjects.suggestions() }
-    }
   }
 }

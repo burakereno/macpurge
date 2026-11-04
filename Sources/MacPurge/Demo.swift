@@ -1,13 +1,16 @@
 import Foundation
 import Observation
 
-enum Workspace: String, CaseIterable, Identifiable {
+enum Workspace: String, Identifiable {
     case overview = "Genel bakış"
     case projects = "Projeler"
     case activity = "Etkinlik"
+    case settings = "Ayarlar"
+    static let destinations: [Self] = [.overview, .projects, .activity]
     var id: Self { self }
     var symbol: String {
         switch self {
+        case .settings: "gearshape"
         case .overview: "square.grid.2x2"
         case .projects: "folder"
         case .activity: "clock.arrow.circlepath"
@@ -33,7 +36,7 @@ struct Output: Identifiable, Hashable {
 func diskAmount(_ mb: Int) -> String {
     if mb == 0 { return "0 GB" }
     if mb < 1000 { return "\(mb) MB" }
-    let value = (Double(mb) / 1000).formatted(.number.locale(Locale(identifier: "tr_TR")).precision(.fractionLength(0...1)))
+    let value = (Double(mb) / 1000).formatted(.number.locale(ReviewLanguage.locale(ReviewLanguage.current)).precision(.fractionLength(0...1)))
     return "\(value) GB"
 }
 

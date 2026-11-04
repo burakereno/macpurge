@@ -12,7 +12,7 @@ struct StorageSafetyTests {
         #expect(Set(safePaths) == [
             "/fixture/.npm/_cacache", "/fixture/Library/Caches/go-build",
             "/fixture/Library/Caches/pip/http", "/fixture/Library/Caches/pip/http-v2",
-            "/fixture/Library/Caches/Homebrew/downloads",
+            "/fixture/Library/Caches/Homebrew/downloads", "/fixture/.gradle/caches",
         ])
         let projectRoot = try #require(roots.first { $0.group == .projects })
         #expect(projectRoot.profile.assessment(for: .complete)?.level == .review)

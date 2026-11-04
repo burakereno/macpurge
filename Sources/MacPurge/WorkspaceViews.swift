@@ -6,7 +6,7 @@ struct Overview: View {
     var body: some View {
         Page {
             PageTitle(kicker: "Çalışma alanı", title: "Genel bakış", subtitle: "Diskindeki alanın hangi projelere ve araçlara ait olduğunu gör.")
-            DiskView(freeMB: demo.freeMB)
+            DiskView(freeMB: demo.freeMB, safeMB: demo.availableMB)
             if demo.trashMB > 0 {
                 Button {
                     demo.show(.activity)
@@ -16,15 +16,20 @@ struct Overview: View {
             }
             VStack(spacing: 10) {
                 SectionHead(title: "Öne çıkanlar", note: "Örnek envanter")
-                Surface {
-                    VStack(spacing: 0) {
-                        ActionRow(symbol: "hammer", tint: Ink.sea, title: "Atlas Studio", description: "Xcode projesi · yeniden üretilebilir çıktılar", amount: diskAmount(demo.availableMB), action: demo.openProject)
-                        Divider().padding(.leading, 69)
-                        ActionRow(symbol: "cube", tint: Ink.sky, title: "Laboratuvar VM", description: "Sanal makine · kişisel disk imajı", amount: "30 GB") { demo.path.append(.machine) }
+                InventoryList(["project", "machine"], id: \.self) { item in
+                    if item == "project" {
+                        ActionRow(symbol: "hammer", tint: Ink.sea, title: "Atlas Studio",
+                            description: "Xcode projesi · yeniden üretilebilir çıktılar",
+                            amount: diskAmount(demo.availableMB), action: demo.openProject)
+                    } else {
+                        ActionRow(symbol: "cube", tint: Ink.sky, title: "Laboratuvar VM",
+                            description: "Sanal makine · kişisel disk imajı", amount: "30 GB") {
+                            demo.path.append(.machine)
+                        }
                     }
                 }
             }
-            Surface {
+            InventoryList(["goal"], id: \.self) { _ in
                 ActionRow(symbol: "scope", tint: Ink.gold, title: "20 GB alan hedefi", description: "Mevcut adayların hedefi ne kadar karşıladığını gör.", amount: "") { demo.path.append(.goal) }
             }
             DisclosureGroup(isExpanded: $showCoverage) {
@@ -41,7 +46,7 @@ struct Projects: View {
     var body: some View {
         Page {
             PageTitle(kicker: "Çalışma alanı", title: "Projeler", subtitle: "Bir projeyi seçerek kaynaklarıyla derleme çıktılarını birlikte incele.")
-            Surface {
+            InventoryList(["project"], id: \.self) { _ in
                 ActionRow(symbol: "hammer", tint: Ink.sea, title: "Atlas Studio", description: "macOS uygulaması · Swift ve Xcode", amount: diskAmount(demo.availableMB), action: demo.openProject)
             }
         }
@@ -58,14 +63,11 @@ struct Activity: View {
                     .padding(.vertical, 40).frame(maxWidth: .infinity)
                 Button("Genel bakışa git") { demo.show(.overview) }
             } else {
-                Surface {
-                    VStack(spacing: 0) {
-                        ForEach(demo.receipts) { receipt in
-                            let status = receipt.restored ? "Geri alındı" : "Örnek Çöp’e taşındı"
-                            ActionRow(symbol: receipt.restored ? "arrow.uturn.backward" : "trash", tint: Ink.sea, title: "Atlas Studio", description: "\(status) · \(receipt.date.formatted(date: .omitted, time: .shortened))", amount: diskAmount(receipt.mb)) { demo.path.append(.receipt(receipt.id)) }
-                            if receipt.id != demo.receipts.last?.id { Divider().padding(.leading, 69) }
-                        }
-                    }
+                InventoryList(demo.receipts) { receipt in
+                    let status = receipt.restored ? "Geri alındı" : "Örnek Çöp’e taşındı"
+                    ActionRow(symbol: receipt.restored ? "arrow.uturn.backward" : "trash", tint: Ink.sea,
+                        title: "Atlas Studio", description: "\(ReviewLanguage.text(status)) · \(receipt.date.reviewDate(date: .omitted, time: .shortened))",
+                        amount: diskAmount(receipt.mb)) { demo.path.append(.receipt(receipt.id)) }
                 }
             }
         }

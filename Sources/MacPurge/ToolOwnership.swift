@@ -8,7 +8,7 @@ import Foundation
 enum ModelInventory {
   /// A manifest references blobs by digest. Count a shared blob once in its
   /// own row, never once per model referencing it.
-  @concurrent static func ollama(at root: URL) async throws -> [ScanRoot] {
+  @concurrent static func ollama(at root: URL, onDevice: dev_t? = nil) async throws -> [ScanRoot] {
     let manifests = root.appending(path: "manifests")
     var info = stat()
     guard lstat(manifests.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { return [] }
@@ -19,7 +19,7 @@ enum ModelInventory {
         failed = true
         return
       }
-      guard let children = try? DirectoryIndex.children(of: dir) else {
+      guard let children = try? DirectoryIndex.children(of: dir, onDevice: onDevice) else {
         failed = true
         return
       }
@@ -61,7 +61,7 @@ enum ModelInventory {
       for digest in digests { owners[digest, default: []].append(model) }
     }
     let blobs = root.appending(path: "blobs")
-    guard let files = try? DirectoryIndex.children(of: blobs) else { return [] }
+    guard let files = try? DirectoryIndex.children(of: blobs, onDevice: onDevice) else { return [] }
     var seen = Set<FileKey>()
     var available = Set<String>()
     for file in files {
@@ -112,6 +112,7 @@ enum ComposeInventory {
     let SharedSize: Int64?
   }
   struct Container: Decodable {
+    let SizeRw: Int64?
     let ImageID: String?
     let Labels: [String: String]?
   }
@@ -125,7 +126,21 @@ enum ComposeInventory {
     }
   }
   struct Payload: Decodable {
-    struct List<T: Decodable>: Decodable { let Items: [T]? }
+    struct List<T: Decodable>: Decodable {
+      let TotalSize: Int64?
+      let Items: [T]?
+    }
+    struct Build: Decodable {
+      let Size: Int64?
+      let Shared: Bool?
+    }
+    let LayersSize: Int64?
+    let BuilderSize: Int64?
+    let BuildCache: [Build]?
+    let ImageUsage: List<Image>?
+    let ContainerUsage: List<Container>?
+    let VolumeUsage: List<Volume>?
+    let BuildCacheUsage: List<Build>?
     let Images: [Image]?
     let Containers: [Container]?
     let Volumes: [Volume]?
@@ -135,10 +150,15 @@ enum ComposeInventory {
   }
   static func rows(data: Data, socket: URL) throws -> [ScanRoot] {
     let report = try JSONDecoder().decode(Payload.self, from: data)
+    let imageUsage = report.ImageUsage ?? report.ImagesUsage
+    let containerUsage = report.ContainerUsage ?? report.ContainersUsage
+    let volumeUsage = report.VolumeUsage ?? report.VolumesUsage
+    let containers = containerUsage?.Items ?? report.Containers
+    let volumes = volumeUsage?.Items ?? report.Volumes
     var consumers: [String: Set<String>] = [:]
     var bytes: [String: Int64] = [:]
     var directories: [String: String] = [:]
-    for container in report.ContainersUsage?.Items ?? report.Containers ?? [] {
+    for container in containers ?? [] {
       let name = container.Labels?["com.docker.compose.project"] ?? ""
       if let id = container.ImageID { consumers[id, default: []].insert(name) }
       if !name.isEmpty, let path = container.Labels?["com.docker.compose.project.working_dir"],
@@ -147,7 +167,7 @@ enum ComposeInventory {
         directories[name] = path
       }
     }
-    for image in report.ImagesUsage?.Items ?? report.Images ?? [] {
+    for image in imageUsage?.Items ?? report.Images ?? [] {
       guard let names = consumers[image.Id], names.count == 1, let name = names.first,
         directories[name] != nil,
         let total = image.Size, let shared = image.SharedSize, shared >= 0, shared <= total
@@ -159,16 +179,43 @@ enum ComposeInventory {
         group: .docker, title: "Compose · " + name, url: URL(fileURLWithPath: directories[name]!),
         profile: .personal, source: .report(size))
     }
-    for volume in report.VolumesUsage?.Items ?? report.Volumes ?? [] {
+    var assignedVolumes: Int64 = 0
+    for volume in volumes ?? [] {
       guard let project = volume.Labels?["com.docker.compose.project"],
         let used = volume.UsageData?.RefCount, used > 0
       else { continue }
       let size = volume.UsageData?.Size.flatMap { $0 >= 0 ? $0 : nil }
+      assignedVolumes += size ?? 0
       rows.append(
         .init(
           group: .docker, title: "Volume · \(project)/\(volume.Name)", url: socket,
           profile: .personal, source: .report(size)))
     }
+    func total(_ values: [Int64?]?) -> Int64? {
+      guard let values, values.allSatisfy({ ($0 ?? -1) >= 0 }) else { return nil }
+      return values.compactMap { $0 }.reduce(0, +)
+    }
+    func remainder(_ name: String, _ total: Int64?, assigned: Int64 = 0) {
+      let size = total.flatMap { $0 >= assigned ? $0 - assigned : nil }
+      rows.append(
+        .init(
+          group: .docker, title: "Docker · " + name, url: socket,
+          profile: .personal, source: .report(size)))
+    }
+    // Compose rows are partitions of these totals. Legacy layer totals already deduplicate images.
+    remainder(
+      "Images", imageUsage.map { $0.TotalSize ?? 0 } ?? report.LayersSize,
+      assigned: bytes.values.reduce(0, +))
+    remainder(
+      "Containers", containerUsage.map { $0.TotalSize ?? 0 } ?? total(containers?.map(\.SizeRw)))
+    remainder(
+      "Volumes",
+      volumeUsage.map { $0.TotalSize ?? 0 } ?? total(volumes?.map { $0.UsageData?.Size }),
+      assigned: assignedVolumes)
+    let buildBytes = total(report.BuildCache?.map { $0.Shared == true ? 0 : $0.Size })
+    remainder(
+      "Build Cache",
+      report.BuildCacheUsage.map { $0.TotalSize ?? 0 } ?? buildBytes ?? report.BuilderSize)
     return rows
   }
 }

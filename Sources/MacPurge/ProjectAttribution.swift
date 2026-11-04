@@ -24,17 +24,49 @@ enum ProjectAttribution {
       $0.path.count < $1.path.count
     }
   }
+  /// Preserve even a missing selection by its spelling. For existing ancestors compare
+  /// filesystem identities, which also cover case aliases and alternate mount paths.
+  struct ProtectedProjects {
+    private let paths: [String]
+    private var ancestors = Set<FileIdentity>()
+
+    init(_ projects: [URL]) {
+      paths = projects.map(\.path)
+      for project in projects {
+        var url = project.resolvingSymlinksInPath().standardizedFileURL
+        while true {
+          var info = stat()
+          if stat(url.path, &info) == 0 { ancestors.insert(FileIdentity(info)) }
+          let parent = url.deletingLastPathComponent()
+          if url.path == "/" || parent.path == url.path { break }
+          url = parent
+        }
+      }
+    }
+
+    func containsProject(under url: URL) -> Bool {
+      if paths.contains(where: { $0 == url.path || $0.hasPrefix(url.path + "/") }) { return true }
+      var info = stat()
+      return !ancestors.isEmpty && lstat(url.path, &info) == 0
+        && ancestors.contains(FileIdentity(info))
+    }
+  }
+
   static let intermediates = "Build/Intermediates.noindex"
 
   // The plist identifies the workspace. A folder name or a project name alone is insufficient.
-  static func workspace(of derived: URL) -> String? {
+  static func workspace(of derived: URL, selected: [URL]? = nil, expected: String? = nil) -> String?
+  {
     guard let data = SmallMetadata.read(derived.appending(path: "info.plist")),
       let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
         as? [String: Any],
       let path = plist["WorkspacePath"] as? String, path.hasPrefix("/"),
       !path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." })
     else { return nil }
+    if let selected, owningRoot(workspace: path, selected: selected) == nil { return nil }
+    if let expected, expected != path { return nil }
     let url = URL(fileURLWithPath: path)
+    guard !ScanExclusions.current.contains(url) else { return nil }
     let marker: String
     switch url.pathExtension {
     case "xcworkspace": marker = "contents.xcworkspacedata"
@@ -49,35 +81,49 @@ enum ProjectAttribution {
     return fstat(fd, &info) == 0 && info.st_mode & S_IFMT == S_IFREG ? path : nil
   }
 
-  @concurrent static func outputRoots(home: URL, selected: [URL]) async throws -> [ScanRoot] {
+  @concurrent static func outputRoots(home: URL, selected: [URL], onDevice: dev_t? = nil)
+    async throws -> [ScanRoot]
+  {
     guard !selected.isEmpty else { return [] }
     let base = home.appending(path: "Library/Developer/Xcode/DerivedData")
     let children: [DirectoryIndex.Entry]
-    do { children = try DirectoryIndex.children(of: base) } catch is DirectoryIndex.Problem {
+    do {
+      children = try DirectoryIndex.children(of: base, onDevice: onDevice)
+    } catch is DirectoryIndex.Problem {
       return []
     }  // The ordinary DerivedData scan reports access failures.
     var roots: [ScanRoot] = []
+    let protection = ProtectedProjects(selected)
     for child in children where child.directory {
       try Task.checkCancellation()
-      let output = child.url.appending(path: intermediates)
-      guard let workspace = workspace(of: child.url),
-        !workspace.hasPrefix(base.path + "/"),
-        owningRoot(workspace: workspace, selected: selected) != nil,
-        !selected.contains(where: { $0.path == output.path || $0.path.hasPrefix(output.path + "/") }
-        ),
-        (try? TrashFiles.directory(output, enumerate: false) { _, _ in true }) == true
-      else { continue }
-      let project = URL(fileURLWithPath: workspace).deletingPathExtension().lastPathComponent
-      roots.append(
-        .init(
-          group: .xcode, title: project + " · " + ReviewLanguage.text("Derleme ara çıktıları"),
-          url: output, profile: .xcodeIntermediate, workspace: workspace))
+      if let root = outputRoot(
+        in: child.url, base: base, selected: selected, protection: protection)
+      {
+        roots.append(root)
+      }
     }
     return roots
   }
 
+  static func outputRoot(
+    in derived: URL, base: URL, selected: [URL], protection: ProtectedProjects? = nil
+  ) -> ScanRoot? {
+    let output = derived.appending(path: intermediates)
+    guard derived.deletingLastPathComponent().path == base.path,
+      let workspace = workspace(of: derived, selected: selected),
+      !workspace.hasPrefix(base.path + "/"),
+      !(protection ?? ProtectedProjects(selected)).containsProject(under: output),
+      (try? TrashFiles.directory(output, enumerate: false) { _, _ in true }) == true
+    else { return nil }
+    let project = URL(fileURLWithPath: workspace).deletingPathExtension().lastPathComponent
+    return .init(
+      group: .xcode, title: project + " · Derleme ara çıktıları",
+      url: output, profile: .xcodeIntermediate, workspace: workspace)
+  }
+
   @concurrent static func derive(
-    home: URL, selected: [URL], measurement: RootSize?, outputBytes: [String: Int64] = [:]
+    home: URL, selected: [URL], measurement: RootSize?, outputBytes: [String: Int64] = [:],
+    only folders: Set<String>? = nil
   ) async throws
     -> [ProjectArtifact]
   {
@@ -85,7 +131,7 @@ enum ProjectAttribution {
     let base = home.appending(path: "Library/Developer/Xcode/DerivedData")
     var output: [ProjectArtifact] = []
     for (folder, bytes) in measurement.largest.merging(outputBytes, uniquingKeysWith: +)
-    where folder != "Kök dosyaları" {
+    where folder != "Kök dosyaları" && (folders?.contains(folder) ?? true) {
       try Task.checkCancellation()
       let url = base.appending(path: folder)
       let metadata = url.appending(path: "info.plist")
@@ -106,6 +152,7 @@ enum ProjectAttribution {
 
 enum SmallMetadata {
   static func read(_ url: URL, limit: Int = 512 * 1024) -> Data? {
+    guard !ScanExclusions.current.contains(url) else { return nil }
     let fd = open(url.path, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
     guard fd >= 0 else { return nil }
     let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)

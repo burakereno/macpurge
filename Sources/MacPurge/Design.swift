@@ -92,7 +92,7 @@ struct SectionHead: View {
         HStack(alignment: .firstTextBaseline) {
             Text(ReviewLanguage.text(title)).font(.system(size: 18, weight: .semibold)).accessibilityAddTraits(.isHeader)
             Spacer()
-            if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
+            if let note { Text(ReviewLanguage.text(note)).font(.caption).foregroundStyle(.secondary) }
         }
     }
 }
@@ -105,20 +105,14 @@ struct ActionRow: View {
     let amount: String
     let action: () -> Void
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 13) {
-                SymbolTile(symbol: symbol, tint: tint)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.system(size: 14, weight: .semibold))
-                    Text(description).font(.callout).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 6)
-                Text(amount).font(.system(size: 14, weight: .semibold)).monospacedDigit()
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 17).padding(.vertical, 12).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        InventoryDisclosure(isExpanded: .constant(false), selectable: [], selected: .constant([]),
+            busy: false, activate: action) {
+            EmptyView()
+        } label: {
+            InventoryGroupHeader(title: title, symbol: symbol, tint: tint, amount: amount,
+                subtitle: ReviewLanguage.text(description)) { EmptyView() }
+        } accessory: { EmptyView() }
+
     }
 }
 
@@ -138,10 +132,10 @@ struct MainAction: View {
     let action: () -> Void
     var body: some View {
         if #available(macOS 26, *) {
-            Button(action: action) { Label(title, systemImage: symbol) }
+            Button(action: action) { Label(ReviewLanguage.text(title), systemImage: symbol) }
                 .buttonStyle(.glassProminent).tint(Ink.sea).controlSize(.large)
         } else {
-            Button(action: action) { Label(title, systemImage: symbol) }
+            Button(action: action) { Label(ReviewLanguage.text(title), systemImage: symbol) }
                 .buttonStyle(.borderedProminent).tint(Ink.sea).controlSize(.large)
         }
     }

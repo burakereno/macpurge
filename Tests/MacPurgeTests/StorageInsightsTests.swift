@@ -55,7 +55,7 @@ struct StorageInsightsTests {
       home: home, journal: home.appending(path: "receipts"), packageIdle: { _ in true })
     let plan = await engine.prepare(items: report.items, reportID: report.id, projects: [])
     #expect(plan.targets.count == 2)
-    #expect(await busy.apply(plan).moved.isEmpty)
+    #expect(try await busy.applyAfterTestConfirmation(plan).moved.isEmpty)
     let incomplete = PackageDownloadCache.brew.rawValue + "/" + bottle + ".incomplete"
     try write(incomplete, value: 8)
     let mixed = try await scan()
@@ -64,11 +64,12 @@ struct StorageInsightsTests {
         == SafetyLevel.review.rawValue)
     // Even a stale/forged Safe report cannot bypass the live payload validation.
     #expect(await engine.prepare(items: safe, reportID: report.id, projects: []).targets.count == 1)
-    let changed = await engine.apply(plan)
+    let changed = try await engine.applyAfterTestConfirmation(plan)
     #expect(changed.moved.count == 1 && changed.moved[0].original.path.hasSuffix("/pip/http-v2"))
     try await engine.restore(try #require(changed.moved.first).id)
     try fm.removeItem(at: home.appending(path: incomplete))
-    let result = await engine.apply(engine.prepare(items: safe, reportID: report.id, projects: []))
+    let result = try await engine.applyAfterTestConfirmation(
+      engine.prepare(items: safe, reportID: report.id, projects: []))
     #expect(result.moved.count == 2)
     #expect(!fm.fileExists(atPath: home.appending(path: brewFile).path))
     #expect(!fm.fileExists(atPath: home.appending(path: pipFile).path))

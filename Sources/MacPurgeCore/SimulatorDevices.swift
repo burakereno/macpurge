@@ -46,11 +46,19 @@ package struct SimulatorInventory: Sendable {
 
   /// Uses only the local device set and its small configuration plists.
   /// Even an unbooted device or one with a missing runtime can occupy space.
-  @concurrent package static func discover(in directory: URL) async throws -> Self {
+  @concurrent package static func discover(in directory: URL, onDevice expected: dev_t? = nil)
+    async throws -> Self
+  {
     try Task.checkCancellation()
+    guard !ScanExclusions.current.contains(directory) else { return Self() }
     let fd = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
     guard fd >= 0 else {
       return Self(note: errno == ENOENT ? nil : "CoreSimulator cihaz klasörüne erişilemedi.")
+    }
+    var parent = stat()
+    guard fstat(fd, &parent) == 0, expected == nil || expected == parent.st_dev else {
+      close(fd)
+      return Self(note: "CoreSimulator cihaz klasörüne erişilemedi.")
     }
     guard let stream = fdopendir(fd) else {
       close(fd)
@@ -70,13 +78,14 @@ package struct SimulatorInventory: Sendable {
           String(cString: $0)
         }
       }
-      guard let id = UUID(uuidString: name) else { continue }
+      guard let id = UUID(uuidString: name),
+        !ScanExclusions.current.contains(directory.appending(path: name)) else { continue }
       var info = stat()
       guard fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else {
         inventory.note = "Cihaz listesinin bir kısmı okunamadı."
         continue
       }
-      guard info.st_mode & S_IFMT == S_IFDIR else { continue }
+      guard info.st_mode & S_IFMT == S_IFDIR, info.st_dev == parent.st_dev else { continue }
       let metadata = metadata(in: name, parent: fd)
       let device = SimulatorDevice(
         id: id, name: metadata?.name.flatMap { $0.isEmpty ? nil : $0 } ?? "Adsız simülatör",

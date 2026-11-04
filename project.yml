@@ -2,7 +2,7 @@ name: MacPurge
 options:
   deploymentTarget:
     macOS: "14.0"
-  developmentLanguage: tr
+  developmentLanguage: en
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -24,8 +24,8 @@ targets:
         embed: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge.prototype
-        INFOPLIST_KEY_CFBundleIconFile: AppIcon
+        PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge
+        INFOPLIST_KEY_CFBundleIconFile: AppIcon.icns
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
         CODE_SIGN_ENTITLEMENTS: Packaging/app-entitlements.plist
         OTHER_SWIFT_FLAGS: "$(inherited) -D MACPURGE_BUNDLE -package-name macpurge"
@@ -40,7 +40,7 @@ targets:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge.prototype.widget
+        PRODUCT_BUNDLE_IDENTIFIER: com.burakerenoglu.macpurge.widget
         CODE_SIGN_ENTITLEMENTS: Packaging/widget-entitlements.plist
         SKIP_INSTALL: YES
 schemes:

@@ -8,7 +8,9 @@ import Foundation
 /// Split broad inventory locations around more specific rows. A browser's model,
 /// for example, belongs to AI, while its sibling profiles belong to the app.
 enum CategoryLocations {
-  static func discover(home: URL, known: [ScanRoot], includeProtected: Bool) throws -> [ScanRoot] {
+  static func discover(home: URL, known: [ScanRoot], includeProtected: Bool, volumes: ScanVolumes)
+    throws -> [ScanRoot]
+  {
     let skippedSupport = [
       "AddressBook", "CallHistoryDB", "CallHistoryTransactions", "CloudDocs", "CloudStorage",
       "FileProvider", "MobileSync", "Knowledge", "FaceTime", "SyncServices", "MacPurge",
@@ -29,7 +31,7 @@ enum CategoryLocations {
     ) throws {
       roots += try unclaimed(
         in: location, group: group, profile: profile,
-        excluding: exclusions ?? excluded, allow: allow)
+        excluding: exclusions ?? excluded, onDevice: volumes.device(for: location), allow: allow)
     }
     let nonApple: (String) -> Bool = {
       !$0.hasPrefix(".") && !$0.hasPrefix("com.apple.") && !$0.hasPrefix("group.com.apple.")
@@ -62,17 +64,23 @@ enum CategoryLocations {
     return roots
   }
 
-  static func largeFolders(in project: URL, excluding claimed: [URL], measurement: RootSize?) throws
+  static func largeFolders(
+    in project: URL, excluding claimed: [URL], measurement: RootSize?, onDevice: dev_t? = nil
+  ) throws
     -> [ScanRoot]
   {
     // Reuse the project's first-level totals to avoid walking every small subtree again.
-    // Link attribution can depend on visit order, so only prune from complete, unshared measurements.
-    let rows = try unclaimed(in: project, group: .other, profile: .unknown, excluding: claimed) {
+    // Shared inodes may be attributed to a sibling. Include duplicate bytes as an upper bound.
+    let rows = try unclaimed(
+      in: project, group: .other, profile: .unknown, excluding: claimed,
+      onDevice: onDevice ?? measurement?.measuredDevice
+    ) {
       name in
-      guard let measurement, measurement.state == .complete, measurement.sharedLinkBytes == 0 else {
+      guard let measurement, measurement.state == .complete else {
         return true
       }
-      return measurement.largest[name, default: 0] >= 500 * 1024 * 1024
+      return measurement.largest[name, default: 0]
+        + measurement.duplicateBytesByBranch[name, default: 0] >= 500 * 1024 * 1024
     }
     return rows.filter { row in
       if case .file = row.source { return false }
@@ -82,7 +90,7 @@ enum CategoryLocations {
 
   static func unclaimed(
     in location: URL, group: ScanGroup, profile: StorageProfile,
-    excluding known: [URL], allow: (String) -> Bool = { _ in true }
+    excluding known: [URL], onDevice: dev_t? = nil, allow: (String) -> Bool = { _ in true }
   ) throws -> [ScanRoot] {
     // All discovery paths descend from explicit roots. File-system standardization
     // can rewrite /private/tmp as /tmp only for paths that already exist.
@@ -96,7 +104,9 @@ enum CategoryLocations {
     func visit(_ directory: URL) throws {
       try Task.checkCancellation()
       let entries: [DirectoryIndex.Entry]
-      do { entries = try DirectoryIndex.children(of: directory) } catch is CancellationError {
+      do {
+        entries = try DirectoryIndex.children(of: directory, onDevice: onDevice ?? originDevice)
+      } catch is CancellationError {
         throw CancellationError()
       } catch let error as DirectoryIndex.Problem where error.code == ENOENT { return } catch {
         rows.append(

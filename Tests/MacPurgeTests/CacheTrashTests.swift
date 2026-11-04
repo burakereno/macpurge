@@ -5,6 +5,15 @@ import Testing
 @testable import MacPurge
 @testable import MacPurgeCore
 
+extension CacheTrash {
+  func applyAfterTestConfirmation(_ plan: TrashPlan) async throws -> TrashOutcome {
+    var preview: TrashPlan? = plan
+    let accepted = try #require(
+      ConfirmedTrashPlan(confirming: plan.id, preview: &preview, currentReportID: plan.reportID))
+    return await apply(accepted)
+  }
+}
+
 struct CacheTrashTests {
   private struct Fixture {
     let home = URL(fileURLWithPath: "/private/tmp")
@@ -16,8 +25,8 @@ struct CacheTrashTests {
     func store(shutdown: Bool = true, device: UUID? = nil) -> CacheTrash {
       CacheTrash(
         home: home, journal: journal,
-        simulatorStates: { device.map { [$0: shutdown ? "Shutdown" : "Booted"] } ?? [:] },
-        xcodeIdle: { true })
+        simulatorStates: { device.map { [$0: SimulatorState(state: shutdown ? "Shutdown" : "Booted")] } ?? [:] },
+        xcodeIdle: { true }, packageIdle: { _ in true })
     }
     init() throws {
       try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
@@ -40,6 +49,287 @@ struct CacheTrashTests {
     }
   }
 
+  @Test func projectIdentityBlocksCaseAndSymlinkAliasesEvenAtApply() async throws {
+    let f = try Fixture()
+    defer { f.finish() }
+    let project = f.go.appending(path: "Work")
+    try f.write(project)
+    let link = f.home.appending(path: "chosen")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: project)
+    let engine = f.store()
+    let row = try f.row(f.go)
+    var selected = [link]
+    let alias = f.home.appending(path: "Library/Caches/GO-BUILD/Work")
+    if FileManager.default.fileExists(atPath: alias.path) { selected.append(alias) }
+    for path in selected {
+      let plan = await engine.prepare(items: [row], reportID: UUID(), projects: [path])
+      #expect(plan.targets.isEmpty)
+    }
+    // A selection can be redirected after the preview without changing cache contents.
+    try FileManager.default.removeItem(at: link)
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: f.bin)
+    let preview = await engine.prepare(items: [row], reportID: UUID(), projects: [link])
+    #expect(preview.targets.count == 1)
+    try FileManager.default.removeItem(at: link)
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: project)
+    #expect(try await engine.applyAfterTestConfirmation(preview).moved.isEmpty)
+    #expect(FileManager.default.fileExists(atPath: project.appending(path: "payload").path))
+  }
+
+  @Test func displayReusesScanButPreviewStillRejectsNewNestedSymlink() async throws {
+    let f = try Fixture()
+    defer { f.finish() }
+    let nested = f.npm.appending(path: "nested")
+    try f.write(nested)
+    let root = ScanRoot(group: .packages, title: "npm", url: f.npm, profile: .npmCache)
+    let size = try await StorageMeter.measure(root)
+    let row = try f.row(f.npm)
+    let engine = f.store()
+    try FileManager.default.createSymbolicLink(
+      at: nested.appending(path: "unsafe"), withDestinationURL: f.bin)
+    #expect(
+      try await engine.availability(
+        for: [row], projects: [], reportID: UUID(),
+        readings: size.cleanupReadings)[row.id] == .ready)
+    #expect(await engine.prepare(items: [row], reportID: UUID(), projects: []).targets.isEmpty)
+  }
+
+  @Test func shortcutsUseLiveSizesIncludingPreviouslyEmptySafeRoots() async throws {
+    let f = try Fixture()
+    defer { f.finish() }
+    try f.write(f.npm)
+    try f.write(f.go)
+    var old = try f.row(f.npm)
+    old.eligibleBytes = 10_000_000_000
+    var empty = try f.row(f.go)
+    empty.bytes = 0
+    empty.eligibleBytes = 0
+    let archive = ScanReport(
+      id: UUID(), date: .distantPast, extended: false, free: nil, capacity: nil,
+      items: [old, empty])
+    let engine = f.store()
+    let current = try await engine.currentPlanInputs(archive, projects: [], hidden: [])
+    let plan = current.report.plan(target: 1_000_000_000, moveStates: current.states)
+    #expect(Set(plan.map(\.id)) == [old.id, empty.id])
+    let actual = await engine.prepare(items: plan, reportID: archive.id, projects: []).targets
+      .reduce(Int64(0)) { $0 + $1.snapshot.bytes }
+    #expect(plan.reduce(0) { $0 + $1.eligibleBytes } == actual && actual < 1_000_000_000)
+    #expect(plan.allSatisfy { $0.directoryInode != nil && $0.measuredAt != nil })
+  }
+
+  @Test func emptiedTrashPrunesOnlyTheDepartedReceipt() async throws {
+    let f = try Fixture()
+    defer { f.finish() }
+    let engine = f.store()
+    try f.write(f.npm)
+    try f.write(f.go)
+    let preview = await engine.prepare(
+      items: [try f.row(f.npm), try f.row(f.go)], reportID: UUID(), projects: [])
+    let receipts = try await engine.applyAfterTestConfirmation(preview).moved
+    let removed = try #require(receipts.first)
+    let kept = try #require(receipts.last)
+    #expect(removed.id != kept.id)
+    try FileManager.default.removeItem(at: f.bin.appending(path: removed.trashName))
+    #expect(try await engine.available().map(\.id) == [kept.id])
+    #expect(
+      !FileManager.default.fileExists(
+        atPath: f.journal.appending(path: removed.id.uuidString + ".json").path))
+    try await engine.restore(kept.id)
+  }
+
+  @Test func categoryAndSingleRowActionsOnlyPreviewCurrentMovableSafeItems() async throws {
+    let f = try Fixture()
+    defer { f.finish() }
+    let phoneID = UUID()
+    let device = f.home.appending(
+      path: "Library/Developer/CoreSimulator/Devices/" + phoneID.uuidString)
+    let cache = device.appending(path: "data/Library/Caches")
+    let temp = device.appending(path: "data/tmp")
+    let documents = device.appending(path: "data/Documents")
+    for path in [cache, temp, documents, f.npm, f.go] { try f.write(path) }
+    let root = ScanRoot(
+      group: .simulators, title: "Phone", url: device,
+      device: SimulatorDevice(id: phoneID, name: "Phone", runtime: "iOS"))
+    let measured = try await StorageMeter.measure(root)
+    let deviceReport = ScanReport.make(
+      roots: [root], results: [root.id: measured], disk: nil,
+      extended: true, homeDevice: measured.measuredDevice)
+    let report = ScanReport(
+      id: UUID(), date: .now, extended: true, free: nil, capacity: nil,
+      items: deviceReport.items + [try f.row(f.npm), try f.row(f.go)])
+    let candidates = report.safeItemsByCategory(excluding: [f.go.path])
+    let simulatorRows = try #require(candidates[ScanGroup.simulators.rawValue])
+    #expect(simulatorRows.count == 1)
+    let engine = f.store(device: phoneID)
+    let states = try await engine.availability(for: report.items, projects: [])
+    let selection = report.movableItems(Set(simulatorRows.map(\.id)), states: states, hidden: [])
+    let plan = await engine.prepare(items: selection, reportID: report.id, projects: [])
+    #expect(Set(plan.targets.map(\.path.path)) == [cache.path, temp.path])
+    #expect(try await engine.available().isEmpty)
+    #expect(FileManager.default.fileExists(atPath: documents.appending(path: "payload").path))
+    let booted = f.store(shutdown: false, device: phoneID)
+    let busyStates = try await booted.availability(for: report.items, projects: [])
+    #expect(
+      report.movableItems(Set(report.items.map(\.id)), states: busyStates, hidden: [f.go.path]).map(
+        \.id) == [f.npm.path])
+    // A regrowth row identifies one exact cache. It must never expand into the rest of the device.
+    let exact = await engine.prepare(
+      items: selection, reportID: report.id, projects: [], onlyPath: temp)
+    #expect(exact.targets.map(\.path.path) == [temp.path])
+    #expect(
+      await engine.prepare(items: selection, reportID: report.id, projects: [], onlyPath: documents)
+        .targets.isEmpty)
+    let result = try await engine.applyAfterTestConfirmation(exact)
+    let receipt = try #require(result.moved.first)
+    #expect(result.moved.count == 1)
+    #expect(
+      FileManager.default.fileExists(atPath: cache.path)
+        && FileManager.default.fileExists(atPath: documents.path))
+    try await engine.restore(receipt.id)
+    #expect(try Data(contentsOf: temp.appending(path: "payload")).count == 16384)
+  }
+
+  @Test func confirmationIsBoundToOneVisiblePreviewAndCannotBeReused() async throws {
+    let f = try Fixture()
+    defer { f.finish() }
+    try f.write(f.npm)
+    try f.write(f.go)
+    let rows = try [f.row(f.npm), f.row(f.go)]
+    let store = f.store()
+    let reportID = UUID()
+    let first = await store.prepare(items: [rows[0]], reportID: reportID, projects: [])
+    var preview: TrashPlan? = first
+    // A cancelled or closed preview has no authority to move anything.
+    preview = nil
+    #expect(
+      ConfirmedTrashPlan(confirming: first.id, preview: &preview, currentReportID: reportID) == nil)
+    let batch = await store.prepare(items: rows, reportID: reportID, projects: [])
+    preview = batch
+    #expect(
+      ConfirmedTrashPlan(confirming: first.id, preview: &preview, currentReportID: reportID) == nil)
+    #expect(
+      ConfirmedTrashPlan(confirming: batch.id, preview: &preview, currentReportID: UUID()) == nil)
+    #expect(try await store.available().isEmpty)
+    #expect(rows.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    let accepted = try #require(
+      ConfirmedTrashPlan(confirming: batch.id, preview: &preview, currentReportID: reportID))
+    #expect(preview == nil)
+    #expect(
+      ConfirmedTrashPlan(confirming: batch.id, preview: &preview, currentReportID: reportID) == nil)
+    let moved = await store.apply(accepted)
+    #expect(Set(moved.moved.map(\.original.path)) == [f.npm.path, f.go.path])
+  }
+
+  @Test func refocusingReusesOnlyTheDisplaySnapshot() async throws {
+    let f = try Fixture()
+    defer { f.finish() }
+    try f.write(f.npm)
+    let row = try f.row(f.npm)
+    let engine = f.store()
+    let id = UUID()
+    #expect(try await engine.availability(for: [row], projects: [], reportID: id)[row.id] == .ready)
+    let prepared = await engine.prepare(items: [row], reportID: id, projects: [])
+    try FileManager.default.linkItem(
+      at: f.npm.appending(path: "payload"), to: f.home.appending(path: "outside"))
+    // Reopening Storage reuses its inspection, but neither preview nor apply can trust it.
+    #expect(try await engine.availability(for: [row], projects: [], reportID: id)[row.id] == .ready)
+    #expect(await engine.prepare(items: [row], reportID: id, projects: []).targets.isEmpty)
+    #expect(try await engine.applyAfterTestConfirmation(prepared).moved.isEmpty)
+    #expect(
+      try await engine.availability(for: [row], projects: [], reportID: UUID())[row.id] != .ready)
+    #expect(try Data(contentsOf: f.npm.appending(path: "payload")).count == 16384)
+    try FileManager.default.moveItem(at: f.npm, to: f.home.appending(path: "old-cache"))
+    let reopened = UUID()
+    #expect(
+      try await engine.availability(for: [row], projects: [], reportID: reopened)[row.id] != .ready)
+    try f.write(f.npm)
+    #expect(
+      try await engine.availability(for: [row], projects: [], reportID: reopened)[row.id] == .ready)
+  }
+
+  @Test func activePackageToolsBlockPreviewAndMoveEvenAfterAnIdleCheck() async throws {
+    actor Running {
+      var busy = false
+      func start() { busy = true }
+      func isIdle() -> Bool { !busy }
+    }
+    let f = try Fixture()
+    defer { f.finish() }
+    try f.write(f.npm)
+    try f.write(f.go)
+    let running = Running()
+    let engine = CacheTrash(
+      home: f.home, journal: f.journal, packageIdle: { _ in await running.isIdle() })
+    let rows = try [f.row(f.npm), f.row(f.go)]
+    let id = UUID()
+    let approved = await engine.prepare(items: rows, reportID: id, projects: [])
+    #expect(approved.targets.count == 2)
+    await running.start()
+    let states = try await engine.availability(for: rows, projects: [], reportID: id)
+    #expect(rows.allSatisfy { states[$0.id] != .ready })
+    #expect(await engine.prepare(items: rows, reportID: id, projects: []).targets.isEmpty)
+    #expect(try await engine.applyAfterTestConfirmation(approved).moved.isEmpty)
+    #expect(rows.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    let unknown = CacheTrash(
+      home: f.home, journal: f.journal, packageIdle: { _ in throw CocoaError(.fileReadUnknown) })
+    #expect(await unknown.prepare(items: rows, reportID: id, projects: []).targets.isEmpty)
+  }
+
+  @Test func packageProcessListingDistinguishesCommandsAndNodeScripts() {
+    for busy in [
+      "npm install", "npx", "/opt/homebrew/bin/npm ci",
+      "node /Tools With Spaces/npm/bin/npm-cli.js ci",
+      "/opt/homebrew/bin/node /tools/npx-cli.js install", "node npm-cli.js ci",
+    ] {
+      #expect(!PackageTool.npm.isIdle(in: "/sbin/launchd\n" + busy + "\n/bin/zsh"))
+    }
+    for busy in ["/usr/local/go/bin/go build ./...", "go test", "/tools/go1.24.3 build"] {
+      #expect(!PackageTool.go.isIdle(in: busy))
+    }
+    let unrelated =
+      "/sbin/launchd\nnode /tmp/npm-notes.js\n/usr/local/bin/gofmt\n/usr/bin/cat /tmp/go /tmp/npm"
+    #expect(PackageTool.npm.isIdle(in: unrelated))
+    #expect(PackageTool.go.isIdle(in: unrelated))
+    #expect(!PackageTool.go.isIdle(in: ""))
+  }
+
+  @Test func damagedReceiptDoesNotHideOtherRestorableCaches() async throws {
+    let f = try Fixture()
+    defer { f.finish() }
+    try f.write(f.go)
+    let engine = f.store()
+    let plan = await engine.prepare(items: [try f.row(f.go)], reportID: UUID(), projects: [])
+    let receipt = try #require(try await engine.applyAfterTestConfirmation(plan).moved.first)
+    let corrupt = f.journal.appending(path: UUID().uuidString + ".json")
+    try Data("{".utf8).write(to: corrupt)
+    let reopened = f.store()
+    #expect(try await reopened.available().map(\.id) == [receipt.id])
+    try await reopened.restore(receipt.id)
+    #expect(try Data(contentsOf: f.go.appending(path: "payload")).count == 16384)
+    #expect(try Data(contentsOf: corrupt) == Data("{".utf8))
+  }
+
+  @Test func proposedPlanOnlyCountsWhatTheGUIWouldAllow() async throws {
+    let f = try Fixture()
+    defer { f.finish() }
+    try f.write(f.npm)
+    let phone = UUID()
+    let device = f.home.appending(
+      path: "Library/Developer/CoreSimulator/Devices/" + phone.uuidString)
+    try f.write(device.appending(path: "data/tmp"))
+    let rows = try [f.row(device, category: ScanGroup.simulators.rawValue), f.row(f.npm)]
+    let report = ScanReport(
+      id: UUID(), date: .now, extended: false, free: nil, capacity: nil, items: rows)
+    let busy = f.store(shutdown: false, device: phone)
+    let states = try await busy.availability(for: rows, projects: [], reportID: report.id)
+    #expect(report.plan(target: .max, moveStates: states).map(\.id) == [rows[1].id])
+    #expect(report.plan(target: .max, excluding: [rows[1].id], moveStates: states).isEmpty)
+    #expect(report.plan(target: .max, moveStates: [:]).isEmpty)
+    let shut = f.store(device: phone)
+    let refreshed = try await shut.availability(for: rows, projects: [], reportID: report.id)
+    #expect(report.plan(target: .max, moveStates: refreshed).count == 2)
+  }
+
   @Test func reversibleBatchReopensAndRefusesToOverwriteNewData() async throws {
     let f = try Fixture()
     defer { f.finish() }
@@ -51,7 +341,7 @@ struct CacheTrashTests {
       reportID: UUID(), projects: [])
     #expect(plan.targets.count == 2)
     #expect(FileManager.default.fileExists(atPath: f.npm.path))
-    let result = await engine.apply(plan)
+    let result = try await engine.applyAfterTestConfirmation(plan)
     #expect(result.notices.isEmpty)
     #expect(result.moved.count == 2)
     let reopened = f.store()
@@ -77,7 +367,7 @@ struct CacheTrashTests {
     let rows = try [f.row(f.npm), f.row(f.go)]
     let plan = await engine.prepare(items: rows, reportID: UUID(), projects: [])
     try Data(repeating: 9, count: 16384).write(to: f.go.appending(path: "payload"))
-    let result = await engine.apply(plan)
+    let result = try await engine.applyAfterTestConfirmation(plan)
     #expect(result.moved.count == 1 && result.notices.count == 1)
     #expect(FileManager.default.fileExists(atPath: f.go.path))
     let next = await engine.prepare(items: [rows[1]], reportID: UUID(), projects: [])
@@ -85,7 +375,7 @@ struct CacheTrashTests {
     let relocated = f.home.appending(path: "relocated")
     try FileManager.default.moveItem(at: parent, to: relocated)
     try FileManager.default.createSymbolicLink(at: parent, withDestinationURL: relocated)
-    #expect(await engine.apply(next).moved.isEmpty)
+    #expect(try await engine.applyAfterTestConfirmation(next).moved.isEmpty)
     #expect(try Data(contentsOf: relocated.appending(path: "go-build/payload")).first == 9)
   }
 
@@ -105,8 +395,8 @@ struct CacheTrashTests {
     #expect(plan.targets.map(\.path.path) == [cache.path])
     let active = f.store(shutdown: false, device: UUID(uuidString: device.lastPathComponent))
     #expect(await active.prepare(items: [row], reportID: UUID(), projects: []).targets.isEmpty)
-    #expect(await active.apply(plan).moved.isEmpty)
-    #expect(await inactive.apply(plan).moved.count == 1)
+    #expect(try await active.applyAfterTestConfirmation(plan).moved.isEmpty)
+    #expect(try await inactive.applyAfterTestConfirmation(plan).moved.count == 1)
     #expect(FileManager.default.fileExists(atPath: personal.appending(path: "payload").path))
   }
 
@@ -151,11 +441,11 @@ struct CacheTrashTests {
     #expect(plan.targets.map(\.path.path) == [output.path])
     let busy = CacheTrash(home: f.home, journal: f.journal, xcodeIdle: { false })
     #expect(try await busy.availability(for: [item], projects: [project])[item.id] != .ready)
-    #expect(await busy.apply(plan).moved.isEmpty)
+    #expect(try await busy.applyAfterTestConfirmation(plan).moved.isEmpty)
     try attribute(logs.path)
-    #expect(await engine.apply(plan).moved.isEmpty)
+    #expect(try await engine.applyAfterTestConfirmation(plan).moved.isEmpty)
     try attribute(workspace.path)
-    let result = await engine.apply(plan)
+    let result = try await engine.applyAfterTestConfirmation(plan)
     let receipt = try #require(result.moved.first)
     #expect(try Data(contentsOf: logs.appending(path: "payload")).first == 9)
     #expect(!FileManager.default.fileExists(atPath: output.path))
@@ -181,7 +471,7 @@ struct CacheTrashTests {
       await engine.prepare(items: [good], reportID: UUID(), projects: [f.npm]).targets.isEmpty)
     let plan = await engine.prepare(items: [good], reportID: UUID(), projects: [])
     try FileManager.default.moveItem(at: f.bin, to: f.home.appending(path: "offline-trash"))
-    let denied = await engine.apply(plan)
+    let denied = try await engine.applyAfterTestConfirmation(plan)
     #expect(denied.moved.isEmpty && !denied.notices.isEmpty)
     #expect(FileManager.default.fileExists(atPath: f.npm.path))
   }
@@ -201,7 +491,7 @@ struct CacheTrashTests {
     let before = try await scan()
     let engine = f.store()
     let plan = await engine.prepare(items: before.items, reportID: before.id, projects: [])
-    let outcome = await engine.apply(plan)
+    let outcome = try await engine.applyAfterTestConfirmation(plan)
     let receipt = try #require(outcome.moved.first)
     let archive = ScanArchive(file: f.home.appending(path: "history.sqlite"))
     try archive.remember(MovedFolder.from(outcome, plan: plan))
@@ -247,7 +537,7 @@ struct CacheTrashTests {
     let engine = f.store(device: udid)
     let eligible = before.items.filter { $0.eligibleBytes > 0 }
     let plan = await engine.prepare(items: eligible, reportID: before.id, projects: [])
-    let moved = MovedFolder.from(await engine.apply(plan), plan: plan)
+    let moved = MovedFolder.from(try await engine.applyAfterTestConfirmation(plan), plan: plan)
     #expect(moved.count == 1)
     try f.write(device.appending(path: "data/tmp"), 3)
     #expect(try await MovedFolder.regrown(moved, in: scan()).isEmpty)

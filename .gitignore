@@ -3,3 +3,8 @@
 dist/
 reference/
 .DS_Store
+*.dmg
+*.p12
+*.cer
+*.keychain-db
+*.zip

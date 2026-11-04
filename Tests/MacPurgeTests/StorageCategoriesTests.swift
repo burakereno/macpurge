@@ -5,6 +5,61 @@ import Testing
 @testable import MacPurgeCore
 
 struct StorageCategoriesTests {
+  @MainActor @Test func overviewKeepsFiveLargestPerCategoryAndStorageKeepsTheFullInventory()
+    async throws
+  {
+    let home = URL(filePath: "/private/tmp/macpurge-overview-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: home) }
+    let prefs = try #require(UserDefaults(suiteName: UUID().uuidString))
+    let scan = LiveScan(
+      defaults: prefs, recordsHistory: false, home: home,
+      localInventory: { home, _, _, _ in
+        var rows = (1...306).map { index in
+          ScanRoot(group: .apps, title: "app-\(index)", url: home.appending(path: "app-\(index)"),
+                   source: .allocation(Int64(index)))
+        }
+        rows += (1...8).map { index in
+          ScanRoot(group: .models, title: "model-\(index)", url: home.appending(path: "model-\(index)"),
+                   source: .allocation(Int64(index)))
+        }
+        rows += [
+          ScanRoot(group: .apps, title: "empty", url: home.appending(path: "empty"), source: .allocation(0)),
+          ScanRoot(group: .apps, title: "absent", url: home.appending(path: "absent")),
+          ScanRoot(group: .apps, title: "unreadable", url: home.appending(path: "unreadable"), source: .status("Erişim izni yok")),
+        ]
+        return rows
+      }, toolInventory: { _, _ in [] })
+    scan.startDetailed()
+    await scan.finishCurrentScan()
+    let apps = try #require(scan.overviewCategories[.apps])
+    #expect(apps.largest.map(\.root.title) == ["app-306", "app-305", "app-304", "app-303", "app-302"])
+    #expect(apps.counts[.review] == 307 && apps.hasIncompleteItems && apps.pendingCount == 0)
+    let total = try #require(scan.groupBytes[.apps])
+    #expect(total == Int64(306 * 307 / 2))
+    #expect(scan.overviewCategories[.models]?.largest.map(\.bytes) == [8, 7, 6, 5, 4])
+    let report = try #require(scan.storageReport)
+    let stored = report.items.filter { $0.category == ScanGroup.apps.rawValue }
+    #expect(stored.count == 308 && stored.contains { $0.name == "empty" })
+    #expect(stored.filter { !$0.complete }.map(\.name) == ["unreadable"])
+
+    scan.startQuick()
+    await scan.finishCurrentScan()
+    #expect(scan.overviewCategories[.apps] == nil && scan.overviewCategories[.models] == nil)
+  }
+
+  @Test func partialMeasurementsCompeteByKnownBytesAndTiesHaveStableOrder() {
+    var preview = OverviewCategory()
+    for title in ["Z", "Y", "X", "W", "V", "U", "Partial", "Partial zero"] {
+      let root = ScanRoot(group: .projects, title: title, url: URL(filePath: "/test/" + title))
+      preview.register(root)
+      let bytes: Int64 = title == "Partial" ? 20 : (title == "Partial zero" ? 0 : 10)
+      preview.record(RootSize(bytes: bytes, state: title.hasPrefix("Partial") ? .partial : .complete), for: root)
+    }
+    #expect(preview.largest.map(\.root.title) == ["Partial", "U", "V", "W", "X"])
+    #expect(preview.hasIncompleteItems && preview.counts[.review] == 8)
+  }
+
   @Test func specificModelAndProtectedFoldersAreNeverCountedAsAppData() async throws {
     let fm = FileManager.default
     let root = URL(fileURLWithPath: "/private/tmp").appending(path: UUID().uuidString)
@@ -114,5 +169,58 @@ struct StorageCategoriesTests {
       id: UUID(), date: .now, extended: false, free: nil, capacity: nil, items: [])
     #expect(CategorySize.read(.android, in: quick) == .outsideScope)
     #expect(CategorySize.read(.models, in: nil) == .waiting)
+  }
+
+  @Test func rescanKeepsEachCategoryUntilItsNewMeasurementIsReady() {
+    let scope = ScanReport.scopeKey(extended: true, protected: false, projects: [])
+    func reading(_ group: ScanGroup, _ name: String, _ bytes: Int64) -> (ScanRoot, RootSize) {
+      (
+        .init(group: group, title: name, url: URL(filePath: "/test/" + name)),
+        RootSize(bytes: bytes)
+      )
+    }
+    func snapshot(_ entries: [(ScanRoot, RootSize)], at date: Date) -> ScanReport {
+      let rows = ScanReport.make(
+        roots: entries.map(\.0),
+        results: Dictionary(uniqueKeysWithValues: entries.map { ($0.0.id, $0.1) }),
+        disk: nil, extended: true, homeDevice: nil)
+      let totals = Dictionary(
+        uniqueKeysWithValues: entries.map { ($0.0.group.rawValue, $0.1.bytes) })
+      return ScanReport(
+        id: rows.id, date: date, extended: true, free: nil, capacity: nil,
+        items: rows.items, groups: totals,
+        groupSafety: totals.mapValues { .init(safe: 0, review: $0) },
+        measuredGroupBytes: totals, scope: scope)
+    }
+    let now = Date.now
+    let old = snapshot(
+      [
+        reading(.xcode, "build", 8), reading(.packages, "old-cache", 30),
+        reading(.temp, "gone", 12),
+      ], at: now.addingTimeInterval(-3600))
+    let new = snapshot([reading(.xcode, "build", 20), reading(.packages, "new-cache", 3)], at: now)
+
+    let halfway = new.retainingPending([.packages, .temp], from: old)
+    #expect(halfway.date == old.date)
+    #expect(
+      Dictionary(uniqueKeysWithValues: halfway.items.map { ($0.name, $0.bytes) }) == [
+        "build": 20, "old-cache": 30, "gone": 12,
+      ])
+    #expect(CategorySize.read(.xcode, in: halfway) == .bytes(20, lowerBound: false))
+    #expect(CategorySize.read(.packages, in: halfway) == .bytes(30, lowerBound: false))
+    #expect(halfway.groupSafety?[ScanGroup.packages.rawValue]?.review == 30)
+    #expect(halfway.measuredGroupBytes?[ScanGroup.packages.rawValue] == 30)
+
+    // Once temp was measured as empty, neither its old item nor its bar should survive.
+    let next = new.retainingPending([.packages], from: old)
+    #expect(!next.items.contains { $0.name == "gone" })
+    #expect(CategorySize.read(.temp, in: next) == .empty)
+    #expect(next.groupSafety?[ScanGroup.temp.rawValue] == nil)
+    #expect(new.retainingPending([], from: old).items == new.items)
+
+    var otherScope = old
+    otherScope.scope = ScanReport.scopeKey(extended: true, protected: true, projects: [])
+    #expect(new.retainingPending([.packages], from: otherScope).items == new.items)
+    #expect(new.retainingPending([.packages], from: nil).date == now)
   }
 }
