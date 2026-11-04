@@ -57,13 +57,15 @@ jobs:
           with open(os.environ["GITHUB_ENV"],"a") as out:
               out.write(f"APP_VERSION={version}\nAPP_BUILD_NUMBER={int(os.environ['GITHUB_RUN_NUMBER'])+19}\n")
           PY
+      - name: Install release tools
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          command -v rg >/dev/null || brew install ripgrep
       - name: Test and audit updater
         run: |
           swift --version
           swift test --scratch-path .build/ci-tests
           bash scripts/audit-macos-updater.sh
-      - name: Install XcodeGen
-        run: command -v xcodegen >/dev/null || brew install xcodegen
       - name: Import exact Developer ID identity
         id: signing
         env:
