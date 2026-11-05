@@ -21,6 +21,10 @@
 </p>
 
 <p align="center">
+  <a href="https://macpurge.burakerenoglu.com">macpurge.burakerenoglu.com</a>
+</p>
+
+<p align="center">
   <img src="docs/screenshots/overview.png" alt="MacPurge Overview with disk usage, free space and cleanup candidates" width="960">
   <br>
   <sub>Overview — disk usage, free space and the largest cleanup candidates.</sub>
