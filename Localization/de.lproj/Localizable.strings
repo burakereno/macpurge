@@ -295,3 +295,7 @@
 "Update Available" = "Update verfügbar";
 "Open update settings" = "Update-Einstellungen öffnen";
 "Keep at least one icon visible in the Dock or menu bar." = "Mindestens ein Symbol muss im Dock oder in der Menüleiste sichtbar bleiben.";
+"Update Now" = "Jetzt aktualisieren";
+"Updating…" = "Wird aktualisiert…";
+"Update failed" = "Update fehlgeschlagen";
+"OK" = "OK";

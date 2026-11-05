@@ -34,7 +34,7 @@ struct LiveWorkspace: View {
             Label("Etkinlik", systemImage: "clock.arrow.circlepath").tag(LiveSection.activity)
           }
         }.listStyle(.sidebar)
-        SettingsSidebarFooter(selected: section == .settings) { section = .settings }
+        SettingsSidebarFooter(scan: scan, selected: section == .settings) { section = .settings }
       }
       .navigationSplitViewColumnWidth(min: 165, ideal: 194, max: 230)
     } detail: {
@@ -71,15 +71,28 @@ struct LiveWorkspace: View {
               Button(action: scan.start) { Label("Yeniden tara", systemImage: "arrow.clockwise") }
                 .help("Tüm konumları yeniden ölç")
             }
-            Menu {
-              Button("Hızlı tarama", action: scan.startQuick)
-              Button("Ayrıntılı tarama", action: scan.startDetailed)
-              Divider()
-              Button("JSON dışa aktar…", action: scan.exportReport).disabled(scan.report == nil)
-            } label: {
-              Label("Tarama kapsamı", systemImage: "slider.horizontal.3")
+          }
+          ToolbarItem(placement: .primaryAction) {
+            ControlGroup {
+              Button(action: scan.startQuick) {
+                Label("Hızlı tarama", systemImage: "bolt")
+              }
+              .help("Hızlı tarama")
+              Button(action: scan.startDetailed) {
+                Label("Ayrıntılı tarama", systemImage: "bolt.badge.clock")
+              }
+              .help("Ayrıntılı tarama")
             }
-            .help("Tarama kapsamı")
+            .controlGroupStyle(.navigation)
+            .labelStyle(.titleAndIcon)
+            .disabled(scan.cleanup.busy)
+          }
+          ToolbarItem(placement: .primaryAction) {
+            Button(action: scan.exportReport) {
+              Label("JSON dışa aktar…", systemImage: "square.and.arrow.up")
+            }
+            .help("JSON dışa aktar…")
+            .disabled(scan.report == nil)
           }
         }
       }

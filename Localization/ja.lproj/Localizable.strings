@@ -295,3 +295,7 @@
 "Update Available" = "アップデートがあります";
 "Open update settings" = "アップデート設定を開く";
 "Keep at least one icon visible in the Dock or menu bar." = "Dockまたはメニューバーに少なくとも1つのアイコンを表示してください。";
+"Update Now" = "今すぐ更新";
+"Updating…" = "更新中…";
+"Update failed" = "アップデートに失敗しました";
+"OK" = "OK";

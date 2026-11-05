@@ -109,6 +109,7 @@ jobs:
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ github.token }}
+          GODEBUG: http2client=0
         run: |
           test -f ".build/releases/v$APP_VERSION/$MANIFEST_ASSET_NAME"
           git tag "v$APP_VERSION"

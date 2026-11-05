@@ -413,3 +413,7 @@
 "Update Available" = "Güncelleme var";
 "Open update settings" = "Güncelleme ayarlarını aç";
 "Keep at least one icon visible in the Dock or menu bar." = "Dock veya menü çubuğunda en az bir simge görünür kalmalı.";
+"Update Now" = "Şimdi güncelle";
+"Updating…" = "Güncelleniyor…";
+"Update failed" = "Güncelleme başarısız";
+"OK" = "Tamam";

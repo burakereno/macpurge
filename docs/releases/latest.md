@@ -1,8 +1,8 @@
-MacPurge 0.6.2 updates menu bar interactions.
+MacPurge 0.6.3 makes scanning and updating easier to reach.
 
-- Left-click the menu bar icon to open MacPurge and bring its workspace forward.
-- Right-click the icon to open the menu with Open MacPurge, Settings, Quick scan and Quit.
-- Control-click also opens the menu.
-- Dock and menu bar visibility continue to follow Settings, with at least one access icon kept available.
+- Quick scan and Extended scan are now visible together in the toolbar, with matching lightning icons and a clock badge for Extended scan.
+- Export JSON is a separate toolbar button, without opening a menu.
+- When an update is available, a prominent Update Now button appears above Settings and starts the download and restart flow directly.
+- The update button shows installation progress and reports any installation error in place.
 
 For Intel and Apple Silicon Macs running macOS 14 or later. The app and DMG are signed with Developer ID, notarized by Apple, and stapled.

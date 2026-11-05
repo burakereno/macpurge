@@ -279,28 +279,75 @@ extension Date {
 
 struct SettingsSidebarFooter: View {
   @Environment(UpdateChecker.self) private var updater
+  let scan: LiveScan
   let selected: Bool
   let openSettings: () -> Void
+  @State private var updateError: String?
 
   var body: some View {
-    List(selection: Binding<Bool?>(
-      get: { selected ? true : nil },
-      set: { if $0 == true { openSettings() } }
-    )) {
+    VStack(spacing: 0) {
       if updater.available {
-        Button(action: openSettings) {
-          Label("Update Available", systemImage: "arrow.down.circle")
-            .foregroundStyle(.tint)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Open update settings")
+        updateButton
+          .padding(.horizontal, 10)
+          .padding(.top, 4)
+          .padding(.bottom, 6)
       }
-      Label("Ayarlar", systemImage: "gearshape").tag(true)
+      List(selection: Binding<Bool?>(
+        get: { selected ? true : nil },
+        set: { if $0 == true { openSettings() } }
+      )) {
+        Label("Ayarlar", systemImage: "gearshape").tag(true)
+      }
+      .listStyle(.sidebar)
+      .scrollDisabled(true)
+      .frame(height: 44)
     }
-    .listStyle(.sidebar)
-    .scrollDisabled(true)
-    .frame(height: updater.available ? 76 : 44)
+    .alert("Update failed", isPresented: Binding(
+      get: { updateError != nil },
+      set: { if !$0 { updateError = nil } }
+    )) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(updateError ?? "")
+    }
+  }
+
+  @ViewBuilder private var updateButton: some View {
+    if #available(macOS 26, *) {
+      updateAction.buttonStyle(.glassProminent)
+    } else {
+      updateAction.buttonStyle(.borderedProminent)
+    }
+  }
+
+  private var updateAction: some View {
+    Button {
+      guard !scan.cleanup.busy, !updater.installing, !updater.checking else { return }
+      updateError = nil
+      scan.cancel()
+      Task {
+        await updater.downloadAndInstall()
+        updateError = updater.lastError
+      }
+    } label: {
+      HStack(spacing: 6) {
+        if updater.installing {
+          ProgressView().controlSize(.small).accessibilityHidden(true)
+        } else {
+          Image(systemName: "arrow.down.circle").accessibilityHidden(true)
+        }
+        Text(LocalizedStringKey(updater.installing ? "Updating…" : "Update Now"))
+          .lineLimit(1).minimumScaleFactor(0.8)
+      }
+      .font(.callout.weight(.semibold))
+      .frame(maxWidth: .infinity)
+    }
+    .tint(Ink.sea)
+    .controlSize(.large)
+    .disabled(scan.cleanup.busy || updater.installing || updater.checking)
+    .help(scan.cleanup.busy
+      ? ReviewLanguage.text("Önce devam eden işlemin bitmesini bekle.")
+      : updater.installationStatus ?? ReviewLanguage.text("Download and Restart"))
+    .accessibilityValue(updater.installationStatus ?? "")
   }
 }

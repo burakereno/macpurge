@@ -125,7 +125,7 @@ struct WorkspaceView: View {
             }
           }
         }.listStyle(.sidebar)
-        SettingsSidebarFooter(selected: demo.workspace == .settings) { demo.show(.settings) }
+        SettingsSidebarFooter(scan: scan, selected: demo.workspace == .settings) { demo.show(.settings) }
       }
       .navigationSplitViewColumnWidth(min: 165, ideal: 194, max: 230)
     } detail: {
