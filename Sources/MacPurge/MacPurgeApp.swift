@@ -8,6 +8,7 @@ struct MacPurgeApp: App {
   @State private var section: LiveSection = .overview
   private let showingDemo = CommandLine.arguments.contains("--demo")
   @State private var presence = AppPresence()
+  @State private var statusItem = DiskStatusItem()
   @State private var updater = UpdateChecker.shared
   @Environment(\.openWindow) private var openWindow
   @AppStorage("reviewLanguage") private var language = ReviewLanguage.defaultLanguage
@@ -49,6 +50,13 @@ struct MacPurgeApp: App {
     .defaultSize(width: 1020, height: 730)
     .defaultPosition(.center)
     .windowToolbarStyle(.unified)
+    .onChange(of: menuInserted, initial: true) {
+      statusItem.update(
+        visible: menuInserted, scan: scan,
+        showWorkspace: { showWorkspace() },
+        showSettings: { showWorkspace(settings: true) },
+        didRemove: { [weak presence = presence] in presence?.setMenuInserted(false) })
+    }
     .commands {
       CommandGroup(after: .appInfo) {
         Button("Check for Updates…") {
@@ -82,13 +90,6 @@ struct MacPurgeApp: App {
           }.keyboardShortcut("p", modifiers: [.command, .shift])
         }
       }
-    }
-    MenuBarExtra(BuildIdentity.name, systemImage: "square.3.layers.3d", isInserted: Binding(
-      get: { menuInserted },
-      set: { presence.setMenuInserted($0) }
-    )) {
-      DiskMenu(scan: scan, showWorkspace: { showWorkspace() }, showSettings: { showWorkspace(settings: true) })
-        .environment(\.locale, ReviewLanguage.locale(language))
     }
   }
 

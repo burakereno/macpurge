@@ -1,11 +1,8 @@
-MacPurge 0.6.1 improves app access, settings and readability.
+MacPurge 0.6.2 updates menu bar interactions.
 
-- New app icon and matching sidebar logo.
-- Closing the window keeps MacPurge available in the Dock or menu bar.
-- Settings always keep at least one access icon enabled.
-- Available updates appear above Settings in the sidebar.
-- The Updates section now sits at the bottom of Settings.
-- Larger disk-summary labels and values.
-- Separate MacPurge Dev builds with a DEV icon and independent local data.
+- Left-click the menu bar icon to open MacPurge and bring its workspace forward.
+- Right-click the icon to open the menu with Open MacPurge, Settings, Quick scan and Quit.
+- Control-click also opens the menu.
+- Dock and menu bar visibility continue to follow Settings, with at least one access icon kept available.
 
 For Intel and Apple Silicon Macs running macOS 14 or later. The app and DMG are signed with Developer ID, notarized by Apple, and stapled.

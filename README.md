@@ -48,6 +48,7 @@
 - **Scan exclusions** — choose folders to skip, including everything inside them, in both quick and extended scans.
 - **History retention** — keep scan records for 30 days, 90 days or forever; restore records are retained separately.
 - **Dock and menu bar access** — use either or both, keep the app available after closing its window, and optionally launch it at login.
+- **Menu bar shortcuts** — left-click the icon to open MacPurge; right-click or Control-click to open its menu.
 - **Optional notifications** — configure low-space thresholds, significant growth alerts and weekly summaries.
 - **Widgets and Shortcuts** — view the last completed disk summary and use read-only intents for saved measurements and space-plan previews.
 - **JSON export and CLI** — export scan reports or generate a read-only cleanup plan from the app's command-line entry point.

@@ -229,22 +229,6 @@ extension Date {
   }
 }
 
-struct DiskMenu: View {
-  let scan: LiveScan
-  let showWorkspace: () -> Void
-  let showSettings: () -> Void
-
-  var body: some View {
-    Button("MacPurge’ü aç", action: showWorkspace)
-    Button("Settings…", action: showSettings)
-    Divider()
-    if let free = scan.report?.free { Text("\(byteLabel(free)) boş alan") }
-    Button("Hızlı tarama", action: scan.startQuick).disabled(scan.phase == .running)
-    Divider()
-    Button("Quit MacPurge") { NSApp.terminate(nil) }
-  }
-}
-
 /// A single preference makes it impossible to persist a configuration with no way back in.
 @MainActor @Observable final class AppPresence {
   enum Location: String {
