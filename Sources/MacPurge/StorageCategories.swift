@@ -18,7 +18,7 @@ extension ScanGroup {
   }
 
   var includedInQuickScan: Bool {
-    [.xcode, .simulators, .packages, .projects, .logs].contains(self)
+    [.xcode, .simulators, .packages, .projects, .logs, .tools].contains(self)
   }
 }
 
@@ -37,7 +37,8 @@ extension ScanReport {
       items: items.filter { !keys.contains($0.category) }
         + last.items.filter { keys.contains($0.category) },
       groups: readings(groups, last.groups), groupSafety: readings(groupSafety, last.groupSafety),
-      measuredGroupBytes: readings(measuredGroupBytes, last.measuredGroupBytes), scope: scope)
+      measuredGroupBytes: readings(measuredGroupBytes, last.measuredGroupBytes), scope: scope,
+      applications: applications ?? last.applications)
   }
 }
 
@@ -101,7 +102,7 @@ enum CategorySize: Equatable {
       {
         return .empty
       }
-      return .bytes(complete, lowerBound: false)
+      return .bytes(complete, lowerBound: !report.extended && group == .tools)
     }
     if let measured = report.measuredGroupBytes?[key] { return .bytes(measured, lowerBound: true) }
     if pending.contains(group) { return .waiting }
@@ -122,93 +123,260 @@ enum CategorySize: Equatable {
     case .bytes(let bytes, let partial): (partial ? "≥ " : "") + byteLabel(bytes)
     }
   }
+
+  static func combined(_ readings: [Self]) -> Self {
+    let bytes = readings.compactMap(\.bytes)
+    if !bytes.isEmpty {
+      let incomplete = readings.contains {
+        switch $0 {
+        case .bytes(_, let lowerBound): lowerBound
+        case .empty: false
+        default: true
+        }
+      }
+      return .bytes(bytes.reduce(0, +), lowerBound: incomplete)
+    }
+    if readings.contains(.waiting) { return .waiting }
+    if readings.contains(.unavailable) { return .unavailable }
+    if readings.contains(.outsideScope) { return .outsideScope }
+    return .empty
+  }
+}
+
+/// Storage navigation groups existing inventory categories without changing their archive keys.
+enum StorageSection: String, CaseIterable {
+  case development, applications, appCaches, intelligence, virtualization, files, system
+
+  var titleKey: String {
+    switch self {
+    case .development: "Geliştirici araçları"
+    case .applications: "Uygulamalar ve medya"
+    case .appCaches: ScanGroup.appCaches.titleKey
+    case .intelligence: "Yapay zekâ"
+    case .virtualization: "Sanal makineler ve konteynerler"
+    case .files: "Dosyalar"
+    case .system: "Sistem ve yedekler"
+    }
+  }
+
+  var icon: ScanGroup {
+    switch self {
+    case .development: .tools
+    case .applications: .apps
+    case .appCaches: .appCaches
+    case .intelligence: .models
+    case .virtualization: .machines
+    case .files: .downloads
+    case .system: .system
+    }
+  }
+
+  var subgroups: [StorageSubgroup] {
+    switch self {
+    case .development: [.category(.xcode), .appleSimulators, .category(.android),
+                        .category(.packages), .category(.tools), .category(.projects)]
+    case .applications: [.applications, .appData, .media]
+    case .appCaches: [.category(.appCaches)]
+    case .intelligence: [.localModels, .aiTools]
+    case .virtualization: [.category(.machines), .category(.docker)]
+    case .files: [.category(.downloads), .category(.shared), .category(.other), .category(.trash)]
+    case .system: [.category(.system), .category(.temp), .category(.logs),
+                   .category(.backups), .category(.snapshots)]
+    }
+  }
+
+  private static let groupsBySection = Dictionary(uniqueKeysWithValues: allCases.map {
+    ($0, Set($0.subgroups.flatMap(\.groups)))
+  })
+  private static let sectionsByGroup = Dictionary(uniqueKeysWithValues: allCases.flatMap { section in
+    (groupsBySection[section] ?? []).map { ($0.rawValue, section) }
+  })
+
+  static func containing(_ category: String) -> Self? { sectionsByGroup[category] }
+
+  static func ordered(
+    in report: ScanReport?, pending: Set<ScanGroup> = []
+  ) -> [(section: Self, reading: CategorySize)] {
+    allCases.map { ($0, $0.size(in: report, pending: pending)) }.sorted {
+      let a = $0.1.bytes ?? -1
+      let b = $1.1.bytes ?? -1
+      return a == b ? $0.0.rawValue < $1.0.rawValue : a > b
+    }
+  }
+
+  func size(in report: ScanReport?, pending: Set<ScanGroup> = []) -> CategorySize {
+    CategorySize.combined((Self.groupsBySection[self] ?? []).map {
+      CategorySize.read($0, in: report, pending: pending)
+    })
+  }
+}
+
+enum StorageSubgroup: Hashable {
+  case category(ScanGroup), appleSimulators, applications, appData, media, localModels, aiTools
+
+  var groups: [ScanGroup] {
+    switch self {
+    case .category(let group): [group]
+    case .appleSimulators: [.simulators, .runtimes]
+    case .applications, .appData, .media: [.apps]
+    case .localModels, .aiTools: [.models]
+    }
+  }
+
+  var titleKey: String {
+    switch self {
+    case .category(.tools): "Araç verileri ve önbellekleri"
+    case .category(.projects): "Seçili projeler"
+    case .category(let group): group.titleKey
+    case .appleSimulators: "Apple simülatörleri"
+    case .applications: "Uygulamalar"
+    case .appData: ScanGroup.apps.titleKey
+    case .media: "Medya kitaplıkları"
+    case .localModels: "Yerel modeller"
+    case .aiTools: "Yapay zekâ aracı verileri"
+    }
+  }
+
+  static func containing(_ item: ReportItem) -> Self? {
+    guard let group = ScanGroup(rawValue: item.category) else { return nil }
+    switch group {
+    case .simulators, .runtimes: return .appleSimulators
+    case .apps:
+      if item.evidence?.kind == .application || item.path == item.application?.path { return .applications }
+      if ["Apple Loops", "Logic ses kitaplığı", "Steam oyunları"].contains(item.name) { return .media }
+      return .appData
+    case .models:
+      if item.evidence?.rule.hasPrefix("ollama.") == true || item.name.hasPrefix("Ollama")
+        || ["LM Studio", "PyTorch modelleri", "Chrome yerel modeli"].contains(item.name)
+        || ["models--", "datasets--", "spaces--"].contains(where: item.name.hasPrefix)
+      { return .localModels }
+      return .aiTools
+    default: return .category(group)
+    }
+  }
 }
 
 struct StorageCategoryIndex: View {
   let scan: LiveScan
   let report: ScanReport?
   let pending: Set<ScanGroup>
-  let changes: [String: Int64]
-  @State private var hoveredGroup: ScanGroup?
-  let open: (ScanGroup) -> Void
+  let horizontalInset: CGFloat
+  let open: (StorageSection) -> Void
 
   var body: some View {
-    let groups = ScanGroup.allCases.sorted {
-      let a = CategorySize.read($0, in: report, pending: pending).bytes ?? -1
-      let b = CategorySize.read($1, in: report, pending: pending).bytes ?? -1
-      if a != b { return a > b }
-      return ReviewLanguage.text($0.titleKey).localizedStandardCompare(
-        ReviewLanguage.text($1.titleKey)) == .orderedAscending
-    }
+    let sections = StorageSection.ordered(in: report, pending: pending)
     let groupsOfItems = Dictionary(grouping: (report?.items ?? []).filter {
       !scan.hiddenIDs.contains($0.id)
-    }, by: \.category)
-    let largest =
-      groups.first.flatMap { CategorySize.read($0, in: report, pending: pending).bytes } ?? 0
+    }, by: { StorageSection.containing($0.category) })
     ScrollView {
-      InventoryList(groups, id: \.self) { group in
-          let reading = CategorySize.read(group, in: report, pending: pending)
-          let items = groupsOfItems[group.rawValue] ?? []
-          let cleanable = scan.distinctCleanups(items)
-          let movable = cleanable.filter { scan.listMoveState($0) == .ready }
-          let amounts = cleanable.reduce(into: [SafetyLevel: Int64]()) { sum, row in
-            let action = scan.action(for: row)
-            if let risk = action.risk { sum[risk, default: 0] += action.bytes }
+      LazyVStack(spacing: 0) {
+        ForEach(sections, id: \.section) { section, reading in
+          if section != sections.first?.section {
+            Divider().padding(.horizontal, ListCardLayout.horizontalPadding)
           }
-          Button {
-            open(group)
-          } label: {
-            StorageCategoryRow(group: group, reading: reading, delta: changes[group.rawValue],
-              amounts: amounts, selectable: scan.categorySelectionLabel(movable), largest: largest)
-              .padding(.vertical, 10).padding(.horizontal, 12)
-              .contentShape(Rectangle())
+          let items = groupsOfItems[section] ?? []
+          let movable = scan.distinctMoves(items)
+          let safeBytes = scan.cleanupBytes(scan.safeMoves(items))
+          let reviewBytes = scan.cleanupBytes(movable.filter { scan.action(for: $0).risk == .review })
+          StorageCategoryLink(section: section, reading: reading, safeBytes: safeBytes,
+            reviewBytes: reviewBytes, status: scan.categorySelectionLabel(movable)) {
+            open(section)
           }
-          .buttonStyle(DisclosureRowStyle(isHovered: hoveredGroup == group))
-          .accessibilityElement(children: .combine)
-          .onHover { inside in
-            if inside { hoveredGroup = group }
-            else if hoveredGroup == group { hoveredGroup = nil }
-          }
-
+        }
       }
+      .clipShape(.rect(cornerRadius: SurfaceCorners.radius))
+      .listCardSurface(hovered: false)
+      .padding(.horizontal, horizontalInset)
     }
   }
 }
 
-/// Storage keeps its category index separate from the expandable cleanup lists.
-private struct StorageCategoryRow: View {
-  let group: ScanGroup
+private struct StorageCategoryLink: View {
+  let section: StorageSection
   let reading: CategorySize
-  let delta: Int64?
-  let amounts: [SafetyLevel: Int64]
-  let selectable: String
-  let largest: Int64
+  let safeBytes: Int64
+  let reviewBytes: Int64
+  let status: String
+  let open: () -> Void
+  @Environment(\.colorScheme) private var scheme
+  @State private var hovered = false
 
   var body: some View {
-    HStack(alignment: .top, spacing: 13) {
-      SymbolTile(symbol: group.symbol, tint: group.tint)
-      VStack(alignment: .leading, spacing: 5) {
-        HStack(alignment: .firstTextBaseline) {
-          Text(ReviewLanguage.text(group.titleKey)).font(.headline)
-            .lineLimit(1).truncationMode(.middle)
-          Spacer(minLength: 6)
-          if let delta { SizeChange(bytes: delta) }
-          InventoryAmount(text: reading.label, prominent: true)
-            .foregroundStyle(reading.bytes == nil ? Color.secondary : .primary)
-        }
-        Text(selectable).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-        if case .bytes(let total, _) = reading {
-          SafetyBar(amounts: amounts, measured: total, largest: largest).padding(.top, 3)
-          HStack(spacing: 14) {
-            ForEach(SafetyLevel.allCases, id: \.self) { level in
-              if let bytes = amounts[level] { SafetyAmount(level: level, bytes: bytes) }
+    Button(action: open) {
+      HStack(spacing: 14) {
+        Image(systemName: section.icon.symbol)
+          .font(.system(size: 15, weight: .semibold))
+          .foregroundStyle(.white)
+          .frame(width: 32, height: 32)
+          .background(tileColor.gradient, in: .rect(cornerRadius: 9))
+          .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 4) {
+          Text(ReviewLanguage.text(section.titleKey)).font(.headline).lineLimit(2)
+          if safeBytes > 0 || reviewBytes > 0 {
+            ViewThatFits(in: .horizontal) {
+              HStack(spacing: 12) { safetyAmounts }
+              VStack(alignment: .leading, spacing: 3) { safetyAmounts }
             }
+          } else {
+            Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(2)
           }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        if safeBytes > 0 { safeBadge }
+        Text(reading.label)
+          .font(reading.bytes == nil ? .callout : .title3.weight(.semibold))
+          .monospacedDigit().lineLimit(1)
+          .foregroundStyle(reading.bytes == nil ? Color.secondary : .primary)
+          .fixedSize(horizontal: true, vertical: false)
+        Image(systemName: "chevron.forward")
+          .font(.system(size: 11, weight: .semibold))
+          .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
       }
-      Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-        .padding(.top, 3).accessibilityHidden(true)
+      .padding(.horizontal, ListCardLayout.horizontalPadding)
+      .padding(.vertical, 12)
+      .contentShape(.rect)
     }
+    .buttonStyle(StorageCategoryLinkStyle(hovered: hovered))
+    .accessibilityElement(children: .combine)
+    .onHover { hovered = $0 }
+  }
+
+  @ViewBuilder private var safetyAmounts: some View {
+    if safeBytes > 0 { SafetyAmount(level: .safe, bytes: safeBytes) }
+    if reviewBytes > 0 { SafetyAmount(level: .review, bytes: reviewBytes) }
+  }
+
+  private var safeBadge: some View {
+    let green = SafetyLevel.safe.color(in: scheme)
+    return Text("\(byteLabel(safeBytes)) \(ReviewLanguage.text("Güvenli temizlenebilir"))")
+      .font(.caption.weight(.semibold)).monospacedDigit().lineLimit(1)
+      .fixedSize(horizontal: true, vertical: false)
+      .foregroundStyle(green)
+      .padding(.horizontal, 8).padding(.vertical, 4)
+      .background(green.opacity(0.12), in: .capsule)
+      .help(ReviewLanguage.text("Estimated space after emptying Trash"))
+  }
+
+  private var tileColor: Color {
+    switch section {
+    case .development: Color(red: 0.25, green: 0.39, blue: 0.68)
+    case .appCaches: Color(red: 0.19, green: 0.51, blue: 0.64)
+    case .applications: Color(red: 0.63, green: 0.29, blue: 0.49)
+    case .intelligence: Color(red: 0.49, green: 0.34, blue: 0.68)
+    case .virtualization: Color(red: 0.15, green: 0.48, blue: 0.48)
+    case .files: Color(red: 0.64, green: 0.36, blue: 0.16)
+    case .system: Color(red: 0.33, green: 0.43, blue: 0.51)
+    }
+  }
+}
+
+private struct StorageCategoryLinkStyle: ButtonStyle {
+  let hovered: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .background(.primary.opacity(configuration.isPressed ? 0.08 : hovered ? 0.045 : 0))
   }
 }
 
@@ -218,31 +386,6 @@ struct SizeChange: View {
     Text((bytes > 0 ? "+" : "−") + byteLabel(abs(bytes)))
       .font(.caption).monospacedDigit().foregroundStyle(bytes > 0 ? Ink.gold : Ink.sea)
       .lineLimit(1).help(ReviewLanguage.text("Önceki eş kapsamlı taramaya göre değişim"))
-  }
-}
-
-private struct SafetyBar: View {
-  let amounts: [SafetyLevel: Int64]
-  let measured: Int64
-  let largest: Int64
-  @Environment(\.colorScheme) private var scheme
-
-  var body: some View {
-    GeometryReader { geometry in
-      let scale = geometry.size.width / CGFloat(max(largest, 1))
-      let safe = min(measured, amounts[.safe] ?? 0)
-      let review = min(measured - safe, amounts[.review] ?? 0)
-      HStack(spacing: 0) {
-        SafetyLevel.safe.color(in: scheme).frame(width: CGFloat(safe) * scale)
-        SafetyLevel.review.color(in: scheme).frame(width: CGFloat(review) * scale)
-        Color.secondary.opacity(0.4).frame(width: CGFloat(measured - safe - review) * scale)
-      }
-      .clipShape(Capsule())
-      .frame(width: geometry.size.width, alignment: .leading)
-      .background(.quaternary, in: Capsule())
-    }
-    .frame(height: 6)
-    .accessibilityHidden(true)
   }
 }
 

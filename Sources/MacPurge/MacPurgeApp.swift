@@ -13,6 +13,7 @@ struct MacPurgeApp: App {
   @Environment(\.openWindow) private var openWindow
   @AppStorage("reviewLanguage") private var language = ReviewLanguage.defaultLanguage
   @AppStorage("scheduledScan") private var daily = false
+  @AppStorage("diskStatusStyle") private var diskStatusStyle = DiskStatusStyle.icon
 
   var body: some Scene {
     let menuInserted = presence.location.hasMenu
@@ -26,7 +27,7 @@ struct MacPurgeApp: App {
       }
       .environment(presence)
       .environment(updater)
-      .frame(minWidth: 690, minHeight: 510)
+      .frame(minWidth: 1020, minHeight: 730)
       .environment(\.locale, ReviewLanguage.locale(language))
       .task(id: daily) {
         guard daily, !showingDemo else { return }
@@ -38,8 +39,8 @@ struct MacPurgeApp: App {
       .onAppear {
         noticeDelegate.showWorkspace = { showWorkspace() }
         noticeDelegate.showSettings = { showWorkspace(settings: true) }
-        noticeDelegate.showActivity = {
-          if showingDemo { demo.show(.activity) } else { section = .activity }
+        noticeDelegate.showStorage = {
+          if showingDemo { demo.show(.overview) } else { section = .storage }
           showWorkspace()
         }
         #if MACPURGE_PROFILE
@@ -47,17 +48,18 @@ struct MacPurgeApp: App {
         #endif
       }
     }
-    .defaultSize(width: 1020, height: 730)
+    .defaultSize(width: 1200, height: 850)
     .defaultPosition(.center)
-    .windowToolbarStyle(.unified)
-    .onChange(of: menuInserted, initial: true) {
+    .windowStyle(.hiddenTitleBar)
+    .onChange(of: DiskStatusConfiguration(visible: menuInserted, style: diskStatusStyle, language: language), initial: true) {
       statusItem.update(
-        visible: menuInserted, scan: scan,
+        visible: menuInserted, style: diskStatusStyle, scan: scan,
         showWorkspace: { showWorkspace() },
         showSettings: { showWorkspace(settings: true) },
         didRemove: { [weak presence = presence] in presence?.setMenuInserted(false) })
     }
     .commands {
+      WorkspaceSearchCommands()
       CommandGroup(after: .appInfo) {
         Button("Check for Updates…") {
           showWorkspace(settings: true)
@@ -70,14 +72,18 @@ struct MacPurgeApp: App {
           Button("Proje klasörleri") { section = .projects }.keyboardShortcut("2")
           Button("Depolama") { section = .storage }.keyboardShortcut("3")
           Button("Alan planı") { section = .plan }.keyboardShortcut("4")
-          Button("Etkinlik") { section = .activity }.keyboardShortcut("5")
+          Button("Uninstall Apps") { section = .uninstall }.keyboardShortcut("6")
+          Button("Duplicates") { section = .duplicates }.keyboardShortcut("7")
           Divider()
           Button("Proje klasörü seç…", action: scan.chooseProjects).keyboardShortcut("o")
-          Button("Yeniden tara", action: scan.start).keyboardShortcut("r").disabled(
-            scan.phase == .running)
+          Button("Yeniden tara", action: scan.start).keyboardShortcut("r")
+            .disabled(scan.phase == .running || scan.cleanup.busy)
           Button("Ayrıntılı tarama", action: scan.startDetailed).keyboardShortcut(
             "r", modifiers: [.command, .shift])
+            .disabled(scan.phase == .running || scan.cleanup.busy)
           Button("Taramayı durdur", action: scan.cancel).disabled(scan.phase != .running)
+          Divider()
+          Button("JSON dışa aktar…", action: scan.exportReport).disabled(scan.report == nil)
         } else {
           ForEach(Array(Workspace.destinations.enumerated()), id: \.element) { index, section in
             Button(ReviewLanguage.text(section.rawValue)) { demo.show(section) }
@@ -128,54 +134,65 @@ struct WorkspaceView: View {
         SettingsSidebarFooter(scan: scan, selected: demo.workspace == .settings) { demo.show(.settings) }
       }
       .navigationSplitViewColumnWidth(min: 165, ideal: 194, max: 230)
+      .toolbar(removing: .sidebarToggle)
     } detail: {
       NavigationStack(path: $demo.path) {
         Group {
           switch demo.workspace {
           case .overview: Overview(demo: demo)
           case .projects: Projects(demo: demo)
-          case .activity: Activity(demo: demo)
           case .settings: ControlSettings(scan: scan)
           }
         }
         .navigationDestination(for: Destination.self) { destination in
-          switch destination {
-          case .project: ProjectDetail(demo: demo)
-          case .machine: MachineDetail()
-          case .plan: Review(demo: demo)
-          case .goal: Goal(demo: demo)
-          case .receipt(let id):
-            if let receipt = demo.receipts.first(where: { $0.id == id }) {
-              ResultView(receipt: receipt, demo: demo)
-            }
-          }
-        }
-      }
-      .navigationTitle(demo.workspace == .settings ? Text("Ayarlar") : Text("MacPurge"))
-      .toolbar {
-        if demo.workspace != .settings {
-          ToolbarItem(placement: .primaryAction) {
-            Menu {
-              Button("20 GB alan hedefini incele") {
-                demo.show(.overview)
-                demo.path.append(.goal)
+          let back = { _ = demo.path.popLast() }
+          Group {
+            switch destination {
+            case .project: ProjectDetail(demo: demo, back: back)
+            case .machine: MachineDetail(back: back)
+            case .plan: Review(demo: demo, back: back)
+            case .goal: Goal(demo: demo, back: back)
+            case .receipt(let id):
+              if let receipt = demo.receipts.first(where: { $0.id == id }) {
+                ResultView(receipt: receipt, demo: demo, back: back)
               }
-              Divider()
-              Button("Örnek oturumu sıfırla") { confirmReset = true }
-            } label: {
-              Label("Örnek oturum seçenekleri", systemImage: "ellipsis")
             }
-            .help("Örnek oturum seçenekleri")
           }
+          .navigationBarBackButtonHidden()
         }
       }
+      .modifier(WorkspaceDetailSurface())
+      .environment(\.workspaceHeaderControls, demo.workspace == .settings ? .none : .demo(
+        WorkspaceDemoMenu(showGoal: {
+          demo.show(.overview)
+          demo.path.append(.goal)
+        }, reset: { confirmReset = true })
+      ))
+      .ignoresSafeArea(.container, edges: .top)
     }
     .tint(Ink.sea)
     .alert("Örnek oturum sıfırlansın mı?", isPresented: $confirmReset) {
       Button("Vazgeç", role: .cancel) {}
       Button("Sıfırla") { demo.reset() }
     } message: {
-      Text("Proje çıktıları ve etkinlik geçmişi başlangıçtaki örnek duruma döner.")
+      Text("Proje çıktıları ve işlem geçmişi başlangıçtaki örnek duruma döner.")
     }
+  }
+}
+
+struct WorkspaceDemoMenu: View {
+  let showGoal: () -> Void
+  let reset: () -> Void
+
+  var body: some View {
+    Menu {
+      Button("20 GB alan hedefini incele", action: showGoal)
+      Divider()
+      Button("Örnek oturumu sıfırla", action: reset)
+    } label: {
+      Label("Örnek oturum seçenekleri", systemImage: "ellipsis")
+    }
+    .workspaceButton(.secondary, controlSize: WorkspaceControlLayout.toolbarSize)
+    .help("Örnek oturum seçenekleri")
   }
 }

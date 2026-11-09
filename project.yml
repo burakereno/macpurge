@@ -11,8 +11,8 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
-    MARKETING_VERSION: "0.6.3"
-    CURRENT_PROJECT_VERSION: 30
+    MARKETING_VERSION: "0.6.4"
+    CURRENT_PROJECT_VERSION: 31
     ENABLE_HARDENED_RUNTIME: YES
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -27,7 +27,15 @@ targets:
   MacPurge:
     type: application
     platform: macOS
-    sources: [Sources/MacPurge, Sources/MacPurgeCore, Shared, Localization, Artwork/AppIcon.icns, Artwork/AppIcon-Dev.icns]
+    sources:
+      - Sources/MacPurge
+      - Sources/MacPurgeCore
+      - Shared
+      - Localization
+      - path: THIRD-PARTY-NOTICES
+        buildPhase: resources
+      - Artwork/AppIcon.icns
+      - Artwork/AppIcon-Dev.icns
     info:
       path: Packaging/App-Info.plist
       properties:

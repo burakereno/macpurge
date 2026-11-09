@@ -2,7 +2,6 @@
 "Depolama" = "Хранилище";
 "Proje klasörleri" = "Папки проектов";
 "Alan planı" = "План места";
-"Etkinlik" = "История";
 "Çalışma alanı" = "Рабочая область";
 "Salt okunur tarama" = "Сканирование без изменений";
 "Güvenli" = "Безопасно";
@@ -50,6 +49,7 @@
 "Dil" = "Язык";
 "Ayarlar" = "Настройки";
 "Tarama kapsamı" = "Область проверки";
+"Scan Disk" = "Сканировать диск";
 "Hızlı tarama" = "Быстрая проверка";
 "Ayrıntılı tarama" = "Подробная проверка";
 "Yeniden tara" = "Повторить проверку";
@@ -273,7 +273,7 @@
 "These folders and everything inside them are skipped in quick and extended scans." = "Эти папки и всё их содержимое пропускаются при быстром и подробном сканировании.";
 "Remove exclusion" = "Удалить исключение";
 "Add folders…" = "Добавить папки…";
-"Activity history" = "История активности";
+"Scan history" = "История сканирования";
 "Keep history" = "Хранить историю";
 "30 days" = "30 дней";
 "90 days" = "90 дней";
@@ -299,3 +299,22 @@
 "Updating…" = "Обновление…";
 "Update failed" = "Не удалось обновить";
 "OK" = "ОК";
+
+/* Storage groups and developer cache status */
+"Yapay zekâ" = "ИИ";
+"Sanal makineler ve konteynerler" = "Виртуальные машины и контейнеры";
+"Dosyalar" = "Файлы";
+"Sistem ve yedekler" = "Система и резервные копии";
+"Araç verileri ve önbellekleri" = "Данные и кеши инструментов";
+"Seçili projeler" = "Выбранные проекты";
+"Apple simülatörleri" = "Симуляторы Apple";
+"Uygulamalar" = "Приложения";
+"Medya kitaplıkları" = "Медиатеки";
+"Yerel modeller" = "Локальные модели";
+"Yapay zekâ aracı verileri" = "Данные инструментов ИИ";
+"Alt grup" = "Подгруппа";
+"Ölçülen alan" = "Измеренный объём";
+"Şu anda taşınabilir: %lld öğe · %@" = "Можно переместить сейчас: %lld · %@";
+"Clang modül önbelleği" = "Кеш модулей Clang";
+"Bu derleme çıktılarının Xcode çalışma alanı artık bulunamıyor." = "Рабочая область Xcode для этих результатов сборки не найдена.";
+"Çalışma alanı bulunamadı. Yalnızca Xcode’un derleme ara çıktıları Çöp’e taşınır." = "Рабочая область не найдена. В корзину будут перемещены только промежуточные файлы сборки Xcode.";

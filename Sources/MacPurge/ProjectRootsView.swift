@@ -18,29 +18,27 @@ struct ProjectRootsView: View {
     let choices = projectItems.filter {
       picks.contains($0.id) && scan.listMoveState($0) == .ready
     }
+    let choose = MainAction(
+      title: "Proje klasörü seç…", symbol: "folder.badge.plus", action: scan.chooseProjects)
+    let clean = SafeTrashButton(scan: scan, group: .projects, items: projectItems,
+      alwaysVisible: !scan.projects.isEmpty)
     Page {
-      HStack(alignment: .top) {
-        PageTitle(
-          kicker: "Çalışma alanı", title: "Proje klasörleri",
-          subtitle:
-            "Projeyi aç, klasörün ne içerdiğini gör ve satırdaki Çöp düğmesiyle temizle."
-        )
-        Spacer(minLength: 4)
-        SafeTrashButton(scan: scan, group: .projects, items: projectItems,
-          alwaysVisible: !scan.projects.isEmpty)
-      }
-      ViewThatFits(in: .horizontal) {
-        HStack {
-          MainAction(
-            title: "Proje klasörü seç…", symbol: "folder.badge.plus", action: scan.chooseProjects)
-          externalButton
-        }
-        VStack(alignment: .leading) {
-          MainAction(
-            title: "Proje klasörü seç…", symbol: "folder.badge.plus", action: scan.chooseProjects)
-          externalButton
+      PageTitle(title: "Proje klasörleri") {
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 8) {
+            choose.fixedSize()
+            externalButton.fixedSize()
+            Spacer(minLength: 8)
+            clean.fixedSize()
+          }
+          VStack(alignment: .leading, spacing: 8) {
+            choose
+            externalButton
+            clean
+          }
         }
       }
+    } content: {
       if let removableRoots {
         if removableRoots.isEmpty {
           Note(
@@ -49,6 +47,7 @@ struct ProjectRootsView: View {
         }
         ForEach(removableRoots, id: \.path) { url in
           Button("Taramaya ekle · \(url.path)") { scan.addProjects([url]) }
+            .workspaceButton(.secondary)
             .disabled(scan.projects.contains(where: { $0.path == url.path }))
         }
       }
@@ -129,6 +128,8 @@ struct ProjectRootsView: View {
               projectRow(project, checked: checked)
             }
           }
+        } else if scan.phase.awaitsMeasurements {
+          WorkspaceSkeleton(layout: .inventory, message: "Konumlar aranıyor…", rows: 3)
         } else if scan.phase == .finished {
           ContentUnavailableView(
             "Proje bulunamadı", systemImage: "folder.badge.questionmark",
@@ -139,16 +140,19 @@ struct ProjectRootsView: View {
         }
       }
     }
-    .safeAreaInset(edge: .bottom) {
+    .safeAreaInset(edge: .bottom, spacing: 0) {
       if !choices.isEmpty {
-        HStack {
-          Text(scan.selectionLabel(choices)).monospacedDigit()
-          Spacer()
-          Button("Seçilenleri Çöp’e taşı…") {
-            scan.cleanup.prepare(choices, scan: scan, explicit: true)
+        WorkspaceListBar {
+          HStack {
+            Text(scan.selectionLabel(choices)).monospacedDigit()
+            Spacer()
+            Button("Seçilenleri Çöp’e taşı…") {
+              scan.cleanup.prepare(choices, scan: scan, explicit: true)
+            }
+            .workspaceButton().disabled(scan.cleanup.busy)
           }
-          .buttonStyle(.borderedProminent).disabled(scan.cleanup.busy)
-        }.padding().background(.bar)
+        }
+        .overlay(alignment: .top) { Divider() }
       }
     }
     .onChange(of: scan.inventoryID) { picks.removeAll() }
@@ -297,7 +301,7 @@ struct ProjectRootsView: View {
   }
 
   private var externalButton: some View {
-    Button("Harici disklerde proje klasörü bul") {
+    MainAction(title: "Harici disklerde proje klasörü bul", symbol: "externaldrive") {
       Task { removableRoots = await ExternalProjects.suggestions() }
     }
   }

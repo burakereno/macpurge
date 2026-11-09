@@ -67,8 +67,11 @@ enum DirectoryIndex {
   }
 
   /// Direct children only, anchored to one opened directory descriptor.
-  static func children(of url: URL, onDevice expected: dev_t? = nil) throws -> [Entry] {
-    guard !ScanExclusions.current.contains(url) else { return [] }
+  static func children(of url: URL, onDevice expected: dev_t? = nil, rejectUnsupported: Bool = false) throws -> [Entry] {
+    guard !ScanExclusions.current.contains(url) else {
+      if rejectUnsupported { throw Problem(code: EACCES) }
+      return []
+    }
     let fd = open(url.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
     guard fd >= 0 else { throw Problem(code: errno) }
     var parent = stat()
@@ -107,11 +110,16 @@ enum DirectoryIndex {
         if errno == ENOENT { continue }
         throw Problem(code: errno)
       }
-      guard info.st_dev == parent.st_dev else { continue }
+      guard info.st_dev == parent.st_dev else {
+        if rejectUnsupported { throw Problem(code: EXDEV) }
+        continue
+      }
       let type = info.st_mode & S_IFMT
       if type == S_IFDIR || type == S_IFREG {
         result.append(
           .init(url: url.appending(path: name), directory: type == S_IFDIR, device: info.st_dev))
+      } else if rejectUnsupported {
+        throw Problem(code: ELOOP)
       }
     }
     return result.sorted { $0.url.path < $1.url.path }

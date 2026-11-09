@@ -2,7 +2,6 @@
 "Depolama" = "저장 공간";
 "Proje klasörleri" = "프로젝트 폴더";
 "Alan planı" = "공간 계획";
-"Etkinlik" = "활동";
 "Çalışma alanı" = "작업 공간";
 "Salt okunur tarama" = "읽기 전용 검사";
 "Güvenli" = "안전";
@@ -50,6 +49,7 @@
 "Dil" = "언어";
 "Ayarlar" = "설정";
 "Tarama kapsamı" = "검사 범위";
+"Scan Disk" = "디스크 스캔";
 "Hızlı tarama" = "빠른 검사";
 "Ayrıntılı tarama" = "상세 검사";
 "Yeniden tara" = "다시 검사";
@@ -273,7 +273,7 @@
 "These folders and everything inside them are skipped in quick and extended scans." = "이 폴더와 모든 내용은 빠른 스캔과 상세 스캔에서 제외됩니다.";
 "Remove exclusion" = "제외 해제";
 "Add folders…" = "폴더 추가…";
-"Activity history" = "활동 기록";
+"Scan history" = "스캔 기록";
 "Keep history" = "기록 보관 기간";
 "30 days" = "30일";
 "90 days" = "90일";
@@ -299,3 +299,22 @@
 "Updating…" = "업데이트 중…";
 "Update failed" = "업데이트 실패";
 "OK" = "확인";
+
+/* Storage groups and developer cache status */
+"Yapay zekâ" = "AI";
+"Sanal makineler ve konteynerler" = "가상 머신 및 컨테이너";
+"Dosyalar" = "파일";
+"Sistem ve yedekler" = "시스템 및 백업";
+"Araç verileri ve önbellekleri" = "도구 데이터 및 캐시";
+"Seçili projeler" = "선택한 프로젝트";
+"Apple simülatörleri" = "Apple 시뮬레이터";
+"Uygulamalar" = "응용 프로그램";
+"Medya kitaplıkları" = "미디어 보관함";
+"Yerel modeller" = "로컬 모델";
+"Yapay zekâ aracı verileri" = "AI 도구 데이터";
+"Alt grup" = "하위 그룹";
+"Ölçülen alan" = "측정한 공간";
+"Şu anda taşınabilir: %lld öğe · %@" = "지금 이동 가능: %lld개 항목 · %@";
+"Clang modül önbelleği" = "Clang 모듈 캐시";
+"Bu derleme çıktılarının Xcode çalışma alanı artık bulunamıyor." = "이 빌드 결과의 Xcode 작업 공간을 찾을 수 없습니다.";
+"Çalışma alanı bulunamadı. Yalnızca Xcode’un derleme ara çıktıları Çöp’e taşınır." = "작업 공간을 찾을 수 없습니다. Xcode의 빌드 중간 파일만 휴지통으로 이동합니다.";

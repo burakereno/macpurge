@@ -57,11 +57,13 @@ enum TrashFiles {
   static func snapshot(
     _ url: URL, on device: Int32, allowSymlinks: Bool = false,
     download: PackageDownloadCache? = nil,
-    fingerprint: Bool = true, review: ManualReview? = nil
+    fingerprint: Bool = true, review: ManualReview? = nil, development: DevelopmentCache? = nil,
+    appCache: Bool = false
   ) throws
     -> CacheSnapshot
   {
-    try directory(url.deletingLastPathComponent(), enumerate: false) { parent, parentInfo in
+    let appBundle = review?.applicationUninstall.map { $0.app.path == review?.path } == true
+    return try directory(url.deletingLastPathComponent(), enumerate: false) { parent, parentInfo in
       if let review, review.file {
         var file = stat()
         guard fstatat(parent, url.lastPathComponent, &file, AT_SYMLINK_NOFOLLOW) == 0 else {
@@ -78,18 +80,25 @@ enum TrashFiles {
           sharedBytes: file.st_nlink > 1 ? Int64(file.st_blocks) * 512 : 0)
       }
       return try directory(url) { fd, info in
-        guard info.st_dev == device, info.st_uid == getuid() else {
+        guard info.st_dev == device, info.st_uid == getuid() || (appBundle && info.st_uid == 0) else {
           throw CleanupFailure("Farklı disk veya kullanıcıya ait klasör.")
         }
+        if appBundle && info.st_flags & UInt32(SF_RESTRICTED | SF_IMMUTABLE | UF_IMMUTABLE | SF_NOUNLINK) != 0 {
+          throw CleanupFailure("macOS protects this application.")
+        }
+        try development?.validate(url)
+        if development == .orphanIntermediates { try XcodeOrphanBuild.verifyOld(info) }
         var hash: SHA256? = fingerprint ? SHA256() : nil
         var links = [FileIdentity: LinkReading]()
         var bytes: Int64 = 0
+        var sharedBlocks: Int64 = 0
         try walk(
-          fd, device: device, depth: 0, allowSymlinks: allowSymlinks || review != nil,
+          fd, device: device, depth: 0, allowSymlinks: allowSymlinks || review != nil, allowRootOwner: appBundle,
           download: download,
           downloadPrefix: "", hash: &hash, links: &links,
-          bytes: &bytes)
-        guard review != nil || links.values.allSatisfy({ $0.remaining == 0 }) else {
+          bytes: &bytes, sharedBlocks: &sharedBlocks, development: development, relative: [], appCache: appCache)
+        guard (review != nil && development != .orphanIntermediates)
+          || links.values.allSatisfy({ $0.remaining == 0 }) else {
           throw CleanupFailure("Klasör dışında bağlantısı olan dosya içeriyor.")
         }
         var check = stat()
@@ -102,15 +111,16 @@ enum TrashFiles {
           parent: FileIdentity(parentInfo), identity: FileIdentity(info),
           changeSeconds: info.st_ctimespec.tv_sec, changeNanoseconds: info.st_ctimespec.tv_nsec,
           digest: hash.map { Data($0.finalize()) } ?? Data(), bytes: bytes,
-          sharedBytes: links.values.filter { $0.remaining > 0 }.reduce(0) { $0 + $1.bytes })
+          sharedBytes: sharedBlocks + links.values.filter { $0.remaining > 0 }.reduce(0) { $0 + $1.bytes })
       }
     }
   }
 
   private static func walk(
-    _ fd: Int32, device: Int32, depth: Int, allowSymlinks: Bool, download: PackageDownloadCache?,
+    _ fd: Int32, device: Int32, depth: Int, allowSymlinks: Bool, allowRootOwner: Bool, download: PackageDownloadCache?,
     downloadPrefix: String, hash: inout SHA256?,
-    links: inout [FileIdentity: LinkReading], bytes: inout Int64
+    links: inout [FileIdentity: LinkReading], bytes: inout Int64, sharedBlocks: inout Int64,
+    development: DevelopmentCache?, relative: [String], appCache: Bool
   ) throws {
     guard depth < 160 else { throw CleanupFailure("Klasör çok derin.") }
     let copy = dup(fd)
@@ -125,7 +135,7 @@ enum TrashFiles {
       try Task.checkCancellation()
       var s = stat()
       guard fstatat(fd, name, &s, AT_SYMLINK_NOFOLLOW) == 0 else { throw posix() }
-      guard s.st_dev == device, s.st_uid == getuid() else {
+      guard s.st_dev == device, s.st_uid == getuid() || (allowRootOwner && s.st_uid == 0) else {
         throw CleanupFailure("Sahip veya disk farklı.")
       }
       let type = s.st_mode & S_IFMT
@@ -135,6 +145,17 @@ enum TrashFiles {
       if let download, !download.accepts(name, directory: type == S_IFDIR, prefix: downloadPrefix) {
         throw CleanupFailure("Yarım indirme veya tanınmayan içerik var. Bu klasör taşınamaz.")
       }
+      if appCache && !AppCacheRule.accepts(name) {
+        throw CleanupFailure("This cache contains offline or profile data.")
+      }
+      let parts = development == nil ? [] : relative + [name]
+      if let development {
+        guard development.accepts(parts, directory: type == S_IFDIR, link: type == S_IFLNK)
+        else { throw CleanupFailure("Unrecognized contents in this developer cache.") }
+        try development.validateEntry(parts, in: fd, info: s)
+      }
+      let entrySharedBlocks = development == .orphanIntermediates
+        ? try XcodeOrphanBuild.sharedBytes(for: parts, in: fd, info: s) : 0
       hash?.update(data: Data(name.utf8))
       hash?.update(data: Data([0]))
       hash?.update(
@@ -149,6 +170,7 @@ enum TrashFiles {
           links[key]?.remaining -= 1
         } else {
           bytes += Int64(s.st_blocks) * 512
+          sharedBlocks += entrySharedBlocks
           if s.st_nlink > 1 {
             links[key] = LinkReading(remaining: Int(s.st_nlink) - 1, bytes: Int64(s.st_blocks) * 512)
           }
@@ -162,9 +184,9 @@ enum TrashFiles {
           throw CleanupFailure("Klasör ölçülürken değişti.")
         }
         try walk(
-          child, device: device, depth: depth + 1, allowSymlinks: allowSymlinks, download: download,
+          child, device: device, depth: depth + 1, allowSymlinks: allowSymlinks, allowRootOwner: allowRootOwner, download: download,
           downloadPrefix: download == nil ? "" : downloadPrefix + name, hash: &hash,
-          links: &links, bytes: &bytes)
+          links: &links, bytes: &bytes, sharedBlocks: &sharedBlocks, development: development, relative: parts, appCache: appCache)
       }
     }
     var names: [String] = []

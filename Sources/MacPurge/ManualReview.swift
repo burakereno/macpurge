@@ -19,6 +19,9 @@ struct ManualReview: Codable, Sendable {
   let inode: ino_t
   let file: Bool
   let warning: String
+  var duplicate: DuplicateGuard? = nil
+  var ollama: OllamaBlobGuard? = nil
+  var applicationUninstall: ApplicationUninstall? = nil
 
   @concurrent static func candidates(
     roots: [ScanRoot], results: [String: RootSize], rows: [ReportItem],
@@ -35,7 +38,8 @@ struct ManualReview: Codable, Sendable {
     }.map(\.url.path)
     var blocked: [String: String] = [:]
     for root in roots where root.source == .directory || root.source == .file {
-      guard root.profile != .systemManaged, root.downloadCache == nil, root.device == nil,
+      guard root.evidence?.inspectionOnly != true,
+        root.profile != .systemManaged, root.downloadCache == nil, root.device == nil,
         root.excludedDirectories.isEmpty,
         let size = results[root.id], size.state == .complete,
         let inode = size.measuredInode, let volume = size.measuredDevice,
@@ -58,10 +62,15 @@ struct ManualReview: Codable, Sendable {
           continue
         }
       }
-      let candidate = Self(
+      var candidate = Self(
+        workspace: root.profile.isMissingWorkspaceOutput ? root.workspace : nil,
         projectOwner: root.projectOwner, scope: scope, title: root.title, profile: root.profile, category: root.group.rawValue,
         path: root.url.path, device: volume,
         inode: inode, file: root.source == .file, warning: risk(for: root))
+      if root.evidence?.rule == "ollama.leftover" {
+        do { candidate.ollama = try OllamaLeftovers.guardFor(root.url) }
+        catch { blocked[row.id] = error.localizedDescription; continue }
+      }
       guard candidate.permits(root.url, home: home) else { continue }
       found[row.id] = candidate
     }
@@ -77,7 +86,9 @@ struct ManualReview: Codable, Sendable {
       let group = ScanGroup(rawValue: row.category)
       let outsideHome = !row.path.hasPrefix(home.path + "/")
       let reason: String
-      if !row.complete {
+      if row.evidence?.inspectionOnly == true {
+        reason = "This data is available for inspection only. Manage it in its owning application."
+      } else if !row.complete {
         reason = row.reason
       } else if downloads.contains(row.path) {
         reason = row.reason
@@ -136,13 +147,35 @@ struct ManualReview: Codable, Sendable {
     }
   }
 
-  func permits(_ url: URL, home: URL) -> Bool {
+  func permits(_ url: URL, home: URL, restoring: Bool = false) -> Bool {
+    if let applicationUninstall {
+      return path == url.path && category == ScanGroup.apps.rawValue
+        && applicationUninstall.permits(url, home: home)
+        && (path != applicationUninstall.app.path || !file)
+    }
     guard url.isFileURL, path == url.path, path.hasPrefix(home.path + "/"),
       let group = ScanGroup(rawValue: category),
       ![.system, .snapshots, .trash, .docker, .simulators, .runtimes].contains(group)
     else { return false }
+    // Application cache paths have their own discovery and live validation policy.
+    if group == .appCaches { return false }
+    if let duplicate {
+      return file && group == .other && path == duplicate.original.path
+        && duplicate.original.identity.device == device && duplicate.original.identity.inode == inode
+        && DuplicateInventory.allowed(url, root: URL(fileURLWithPath: duplicate.scope), home: home)
+        && duplicate.survivor.path != path
+        && duplicate.survivor.path.hasPrefix(duplicate.scope + "/")
+    }
+    if let ollama { return file && group == .models && ollama.identity.device == device && ollama.identity.inode == inode && ollama.permits(url, home: home) }
     if profile == .gradleCache {
       return group == .packages && !file && path == home.appending(path: ".gradle/caches").path
+    }
+    if profile.isMissingWorkspaceOutput {
+      return group == .xcode && !file && workspace != nil
+        && ProjectAttribution.derivedFolder(for: url, home: home) != nil
+    }
+    if profile == .npxEntry {
+      return group == .packages && !file && DevelopmentCache.at(url, home: home) == .npx
     }
     let parts = path.dropFirst(home.path.count + 1).components(separatedBy: "/")
     guard !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return false }
@@ -158,7 +191,7 @@ struct ManualReview: Codable, Sendable {
     let protected = [
       ".trash", "library/application support/macpurge", "library/mobile documents",
       "library/cloudstorage", "library/application support/com.apple.tcc",
-    ]
+    ] + (restoring ? [] : [".expo"])
     return !protected.contains {
       relative == $0 || relative.hasPrefix($0 + "/") || $0.hasPrefix(relative + "/")
     }
@@ -185,6 +218,12 @@ struct ManualReview: Codable, Sendable {
   }
 
   private static func risk(for root: ScanRoot) -> String {
+    if root.profile == .npxEntry {
+      return "npx may need to download this package again. It may be unavailable offline."
+    }
+    if root.evidence?.rule == "ollama.leftover" {
+      return "Only this old unreferenced layer or download fragment will move to the Trash. A later model download may restart."
+    }
     if root.profile == .projectOutput { return ProjectOutput.effect(root.url) }
     if root.group == .xcode {
       if root.url.lastPathComponent == "Archives" || root.url.pathExtension == "xcarchive" {
@@ -194,6 +233,9 @@ struct ManualReview: Codable, Sendable {
       if root.profile == .xcodeWorkspace {
         return
           "Derleme çıktılarıyla birlikte test sonuçları, günlükler ve paket çalışma kopyaları da taşınır."
+      }
+      if root.profile == .xcodeOrphanIntermediate {
+        return "Çalışma alanı bulunamadı. Yalnızca Xcode’un derleme ara çıktıları Çöp’e taşınır."
       }
       return "Bu Xcode verisini kullanan araçlar yeniden indirme veya derleme gerektirebilir."
     }

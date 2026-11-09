@@ -96,6 +96,172 @@ struct CleanupMeasurementTests {
     return try #require(scan.cleanup.outcome).moved
   }
 
+  @Test func npxReviewCannotMoveAnActiveCache() async throws {
+    actor Tool {
+      var active: URL?
+      func use(_ entry: URL?) { active = entry }
+      func snapshot() throws -> DevelopmentCacheUse {
+        let user = getuid()
+        let server = "100 1 \(user) node /test/astro dev"
+        let commands = server + "\n101 1 \(user) npm exec fixture"
+        let child = active.map { "\n102 101 \(user) node \($0.path)/node_modules/pkg/main.js" } ?? ""
+        return try DevelopmentCacheUse(
+          processList: active == nil ? server : commands + child,
+          openFiles: "p100\nn/private/tmp",
+          environmentList: active == nil ? server :
+            server + " npm_execpath=/test/npm-cli.js\n101 1 \(user) npm exec fixture" + child
+              + " npm_execpath=/test/npm-cli.js",
+          npxRoot: active?.deletingLastPathComponent() ?? URL(filePath: "/unused"))
+      }
+    }
+    let f = try Fixture()
+    defer { f.finish() }
+    func entry(_ key: String, days: Double) throws -> URL {
+      let base = ".npm/_npx/\(key)"
+      try f.write(base + "/node_modules/pkg/main.js")
+      let manifest = try f.write(base + "/package.json")
+      try Data(#"{"dependencies":{"pkg":"^1.0.0"}}"#.utf8).write(to: manifest)
+      let lock = try f.write(base + "/package-lock.json")
+      try Data(#"{"packages":{"":{},"node_modules/pkg":{"resolved":"https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz"}}}"#.utf8).write(to: lock)
+      let url = f.home.appending(path: base)
+      for path in [url, manifest, lock, url.appending(path: "node_modules")] {
+        try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(-days * 86_400)],
+          ofItemAtPath: path.path)
+      }
+      return url
+    }
+    let active = try entry("0123456789abcdef", days: 45)
+    let unused = try entry("0123456789abcdee", days: 45)
+    let recent = try entry("0123456789abcdec", days: 1)
+    let tool = Tool()
+    await tool.use(active)
+    let engine = CacheTrash(home: f.home, journal: f.home.appending(path: "journal"),
+      simulatorStates: { [:] }, developmentUse: { try await tool.snapshot() })
+    let scan = await f.scan(simulatorEngine: engine)
+    let report = try #require(scan.report)
+    let activeRow = try #require(report.items.first { $0.path == active.path })
+    let unusedRow = try #require(report.items.first { $0.path == unused.path })
+    let recentRow = try #require(report.items.first { $0.path == recent.path })
+    guard case .inUse = scan.listMoveState(activeRow) else {
+      Issue.record("Active npx must block a reviewed move")
+      return
+    }
+    #expect(scan.listMoveState(recentRow) != .ready)
+    let blocked = await engine.prepare(items: [activeRow, recentRow], reportID: report.id, projects: [],
+      manual: scan.manualMoves)
+    #expect(blocked.targets.isEmpty)
+    let preview = await engine.prepare(items: [unusedRow], reportID: report.id, projects: [],
+      manual: scan.manualMoves)
+    #expect(preview.needsReview && preview.targets.count == 1)
+    await tool.use(unused)
+    #expect(try await engine.applyAfterTestConfirmation(preview, acknowledgedReview: true).moved.isEmpty)
+    #expect(FileManager.default.fileExists(atPath: unused.path))
+    await tool.use(active)
+    let moved = try await engine.applyAfterTestConfirmation(preview, acknowledgedReview: true).moved
+    let receipt = try #require(moved.first)
+    let restored = try await engine.restore(receipt.id)
+    #expect(restored.original.path == unused.path)
+  }
+
+  @Test func developerCachesRequireRecognizedFilesAndIdleProcesses() async throws {
+    let f = try Fixture()
+    defer { f.finish() }
+    let stats = try f.write("Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/test.sdkstatcache")
+    try Data("STATfixture".utf8).write(to: stats)
+    let apk = try f.write(".expo/android-apk-cache/Expo-Go-58.0.5.apk")
+    try Data([0x50, 0x4b, 0x03, 0x04, 0x00]).write(to: apk)
+    let engine = CacheTrash(home: f.home, journal: f.home.appending(path: "journal"),
+      simulatorStates: { [:] }, developmentUse: {
+        try DevelopmentCacheUse(processList: "100 1 \(getuid()) node /test/node_modules/expo/bin/cli",
+          openFiles: "p100\nn/private/tmp")
+      })
+    let scan = await f.scan(simulatorEngine: engine)
+    let report = try #require(scan.report)
+    let compiler = try #require(report.items.first { $0.path == stats.deletingLastPathComponent().path })
+    let expo = try #require(report.items.first { $0.path == apk.deletingLastPathComponent().path })
+    #expect(scan.listMoveState(compiler) == .ready)
+    guard case .inUse = scan.listMoveState(expo) else {
+      Issue.record("A running Expo CLI must block its download cache")
+      return
+    }
+    try Data("unrecognized".utf8).write(to: stats)
+    let preview = await engine.prepare(items: [compiler, expo], reportID: report.id, projects: [])
+    #expect(preview.targets.isEmpty)
+  }
+
+  @Test func missingWorkspaceIntermediatesRequireContentAndUsageChecksAndRevalidateTheWorkspace() async throws {
+    actor Activity {
+      var active: URL?
+      func set(_ url: URL?) { active = url }
+      func reading() throws -> DevelopmentCacheUse {
+        try DevelopmentCacheUse(processList: "100 1 \(getuid()) fixture",
+          openFiles: "p100\nn" + (active?.path ?? "/private/tmp"))
+      }
+    }
+    let f = try Fixture()
+    defer { f.finish() }
+    let workspace = f.home.appending(path: "Projects/Missing.xcodeproj")
+    let base = "Library/Developer/Xcode/DerivedData/Missing-abc/"
+    let plist = try f.write(base + "info.plist")
+    try PropertyListEncoder().encode(["WorkspacePath": workspace.path]).write(to: plist)
+    let relative = base + ProjectAttribution.intermediates
+    let payload = try f.write(relative + "/ExplicitPrecompiledModules/output.pcm")
+    try Data("CPCH".utf8 + Data(repeating: 7, count: 16384)).write(to: payload)
+    let database = try f.write(relative + "/XCBuildData/build.db")
+    try Data("SQLite format 3\0".utf8).write(to: database)
+    let projectCopy = f.home.appending(path: "Projects/shared.pcm")
+    try FileManager.default.createDirectory(at: projectCopy.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let shared = payload.deletingLastPathComponent().appending(path: "shared.pcm")
+    try Data("CPCH".utf8 + Data(repeating: 8, count: 16384)).write(to: projectCopy)
+    try #require(clonefile(projectCopy.path, shared.path, 0) == 0)
+    let log = try f.write(base + "Logs/keep.log")
+    let root = f.home.appending(path: relative)
+    let old = Date.now.addingTimeInterval(-48 * 60 * 60)
+    func markOld(_ url: URL) throws {
+      try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: url.path)
+    }
+    for url in [payload, shared, database, payload.deletingLastPathComponent(), database.deletingLastPathComponent(), root] {
+      try markOld(url)
+    }
+    let activity = Activity()
+    let engine = CacheTrash(home: f.home, journal: f.home.appending(path: "journal"),
+      simulatorStates: { [:] }, xcodeIdle: { true }, developmentUse: { try await activity.reading() })
+    let scan = await f.scan(simulatorEngine: engine)
+    let report = try #require(scan.report)
+    let row = try #require(report.items.first { $0.path == root.path })
+    #expect(row.profile == .xcodeOrphanBuild)
+    let safe = scan.action(for: row)
+    #expect(safe.risk == .safe && safe.bytes > 0 && safe.bytes < (row.bytes ?? 0))
+
+    await activity.set(payload)
+    #expect(await engine.prepare(items: [row], reportID: report.id, projects: []).targets.isEmpty)
+    await activity.set(nil)
+    let unexpected = try f.write(relative + "/ExplicitPrecompiledModules/notes.swift")
+    try markOld(unexpected)
+    try markOld(unexpected.deletingLastPathComponent())
+    #expect(await engine.prepare(items: [row], reportID: report.id, projects: []).targets.isEmpty)
+    try FileManager.default.removeItem(at: unexpected)
+    #expect(await engine.prepare(items: [row], reportID: report.id, projects: []).targets.isEmpty)
+    try markOld(unexpected.deletingLastPathComponent())
+    let plan = await engine.prepare(items: [row], reportID: report.id, projects: [])
+    #expect(!plan.needsReview && plan.targets.count == 1)
+    #expect(plan.reclaimableBytes == safe.bytes)
+    _ = try f.write("Projects/Missing.xcodeproj/project.pbxproj")
+    #expect(try await engine.applyAfterTestConfirmation(plan).moved.isEmpty)
+    #expect(FileManager.default.fileExists(atPath: payload.path))
+    #expect(FileManager.default.fileExists(atPath: log.path))
+    #expect(FileManager.default.fileExists(atPath: projectCopy.path))
+
+    try FileManager.default.removeItem(at: workspace)
+    let fresh = await engine.prepare(items: [row], reportID: report.id, projects: [])
+    let moved = try await engine.applyAfterTestConfirmation(fresh).moved
+    let receipt = try #require(moved.first)
+    #expect(receipt.expectedRecoveryBytes == safe.bytes)
+    #expect(FileManager.default.fileExists(atPath: projectCopy.path))
+    _ = try await engine.restore(receipt.id)
+    #expect(FileManager.default.fileExists(atPath: payload.path))
+  }
+
   @Test func mixedLogCategoryExplainsSystemLogsAndConfirmsOnlyUserLogs() async throws {
     let f = try Fixture()
     defer { f.finish() }

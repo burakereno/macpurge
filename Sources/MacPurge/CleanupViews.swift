@@ -77,6 +77,13 @@ import SwiftUI
     }
   }
 
+  func beginExternalOperation() -> Bool {
+    guard !busy, preview == nil, permanentReview == nil else { return false }
+    busy = true
+    return true
+  }
+  func endExternalOperation() { busy = false }
+
   func prepare(
     _ items: [ReportItem], scan: LiveScan, onlyPath: URL? = nil, explicit: Bool = false,
     includeSkipped: Bool = false
@@ -121,10 +128,25 @@ import SwiftUI
       preview = nil
       return
     }
+    applyMove(confirmed, scan: scan)
+  }
+
+  func removeApplication(_ targets: [TrashTarget], inventoryID: UUID, scan: LiveScan) {
+    guard !busy, preview == nil, permanentReview == nil, scan.inventoryID == inventoryID,
+      let confirmed = ConfirmedTrashPlan(removingApplication: TrashPlan(reportID: inventoryID,
+        projects: scan.protectedProjects, targets: targets, exclusions: scan.excludedFolders))
+    else { return }
+    applyMove(confirmed, scan: scan)
+  }
+
+  private func applyMove(_ confirmed: ConfirmedTrashPlan, scan: LiveScan) {
     busy = true
     applying = true
     message = nil
+    let restartStorageScan = confirmed.plan.applicationUninstall != nil && scan.phase == .running
+    if restartStorageScan { scan.cancel() }
     work = Task {
+      if confirmed.plan.applicationUninstall != nil { await scan.finishCurrentScan() }
       let result = await engine.apply(confirmed)
       outcome = result
       // Stop cancels remaining moves, never the reconciliation of completed renames.
@@ -142,6 +164,7 @@ import SwiftUI
       busy = false
       applying = false
       work = nil
+      if restartStorageScan { scan.start() }
     }
   }
 
@@ -190,11 +213,11 @@ struct CleanupControls: View {
       } label: {
         Label("Çöp’e taşımayı incele…", systemImage: "trash")
       }
-      .buttonStyle(.borderedProminent)
+      .workspaceButton()
       .disabled(choices.isEmpty || scan.phase != .finished || session.busy)
       if session.busy && session.permanentReview == nil {
         HStack {
-          ProgressView().controlSize(.small)
+          WorkspaceActivityIndicator()
           if session.restoring {
             Text("Geri alınıyor…")
           } else {
@@ -202,6 +225,7 @@ struct CleanupControls: View {
               ReviewLanguage.text(
                 session.applying ? "Çöp’e taşınıyor…" : "Seçilen klasörler doğrulanıyor…"))
             Button("Durdur") { session.cancel() }
+              .workspaceButton(.secondary)
           }
         }
       }
@@ -275,7 +299,8 @@ struct TrashPreviewSheet: View {
           if !plan.targets.isEmpty {
             InventoryList(items, id: \.first?.itemID) { targets in
               if let first = targets.first {
-                TrashPreviewRow(target: first, targets: targets)
+                TrashPreviewRow(target: first, targets: targets,
+                  item: scan.report?.items.first { $0.id == first.itemID })
               }
             }
           }
@@ -320,12 +345,13 @@ struct TrashPreviewSheet: View {
       HStack {
         Spacer()
         Button(plan.targets.isEmpty ? "Bitti" : "Vazgeç") { scan.cleanup.preview = nil }
+          .workspaceButton(plan.targets.isEmpty ? .primary : .secondary)
           .keyboardShortcut(.cancelAction)
         if !plan.targets.isEmpty {
           Button("Çöp’e taşı", role: .destructive) {
             scan.cleanup.confirmMove(plan.id, scan: scan, acknowledgedReview: acknowledgedReview)
           }
-          .buttonStyle(.borderedProminent).disabled(!canContinue)
+          .workspaceButton(.destructive).disabled(!canContinue)
         }
       }
     }
@@ -345,6 +371,9 @@ struct TrashPreviewSheet: View {
 private struct TrashPreviewRow: View {
   let target: TrashTarget
   let targets: [TrashTarget]
+  let item: ReportItem?
+  @State private var showsLocations = false
+  @State private var showsExplanation = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -357,7 +386,7 @@ private struct TrashPreviewRow: View {
       if targets.count == 1 {
         pathLabel(target)
       } else {
-        DisclosureGroup {
+        DisclosureGroup(isExpanded: $showsLocations) {
           InventoryRows(targets) { target in
             InventoryReadout(title: target.path.lastPathComponent,
               amount: byteLabel(target.snapshot.reclaimableBytes), subtitle: target.path.path,
@@ -379,9 +408,16 @@ private struct TrashPreviewRow: View {
         }
         .padding(.top, 3)
       }
+      if let item {
+        DisclosureGroup(ReviewLanguage.text("Why review it?"), isExpanded: $showsExplanation) {
+          InventoryExplanationView(item: item)
+        }.font(.caption)
+      }
     }.padding(.horizontal, InventoryLayout.horizontalPadding)
       .padding(.vertical, InventoryLayout.verticalPadding)
       .frame(maxWidth: .infinity, alignment: .leading)
+      .inventoryRowDetails()
+      .inventoryRowCard(isExpanded: showsLocations || showsExplanation)
   }
 
   private func pathLabel(_ target: TrashTarget) -> some View {
@@ -435,7 +471,7 @@ struct ItemTrashButton: View {
     if !scan.hiddenIDs.contains(item.id) {
       if let operation = scan.action(for: item).permanentOperation {
         let label = operation.title + "…"
-        Button {
+        let button = Button {
           if let beforePreview { beforePreview() } else { scan.cleanup.reviewPermanentCleanup(item, scan: scan) }
         } label: {
           if showActionTitle {
@@ -445,8 +481,13 @@ struct ItemTrashButton: View {
               .contentShape(Rectangle())
           }
         }
-        .buttonStyle(.plain).foregroundStyle(.secondary).disabled(scan.cleanup.busy)
         .help(label).accessibilityLabel(label + " · " + item.actionTitle)
+        .disabled(scan.cleanup.busy)
+        if showActionTitle {
+          button.workspaceButton(.secondary)
+        } else {
+          button.buttonStyle(.plain).foregroundStyle(.secondary)
+        }
       } else {
         RowMoveButton(title: item.actionTitle, reason: scan.listMoveState(item).explanation, busy: scan.cleanup.busy) {
           if let beforePreview {

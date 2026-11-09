@@ -2,7 +2,6 @@
 "Depolama" = "Speicher";
 "Proje klasörleri" = "Projektordner";
 "Alan planı" = "Speicherplan";
-"Etkinlik" = "Aktivität";
 "Çalışma alanı" = "Arbeitsbereich";
 "Salt okunur tarama" = "Schreibgeschützter Scan";
 "Güvenli" = "Sicher";
@@ -50,6 +49,7 @@
 "Dil" = "Sprache";
 "Ayarlar" = "Einstellungen";
 "Tarama kapsamı" = "Scanumfang";
+"Scan Disk" = "Festplatte scannen";
 "Hızlı tarama" = "Schnellscan";
 "Ayrıntılı tarama" = "Erweiterter Scan";
 "Yeniden tara" = "Erneut scannen";
@@ -273,7 +273,7 @@
 "These folders and everything inside them are skipped in quick and extended scans." = "Diese Ordner und ihr gesamter Inhalt werden bei schnellen und erweiterten Scans übersprungen.";
 "Remove exclusion" = "Ausnahme entfernen";
 "Add folders…" = "Ordner hinzufügen…";
-"Activity history" = "Aktivitätsverlauf";
+"Scan history" = "Scanverlauf";
 "Keep history" = "Verlauf aufbewahren";
 "30 days" = "30 Tage";
 "90 days" = "90 Tage";
@@ -299,3 +299,22 @@
 "Updating…" = "Wird aktualisiert…";
 "Update failed" = "Update fehlgeschlagen";
 "OK" = "OK";
+
+/* Storage groups and developer cache status */
+"Yapay zekâ" = "KI";
+"Sanal makineler ve konteynerler" = "Virtuelle Maschinen und Container";
+"Dosyalar" = "Dateien";
+"Sistem ve yedekler" = "System und Backups";
+"Araç verileri ve önbellekleri" = "Werkzeugdaten und Caches";
+"Seçili projeler" = "Ausgewählte Projekte";
+"Apple simülatörleri" = "Apple-Simulatoren";
+"Uygulamalar" = "Programme";
+"Medya kitaplıkları" = "Medienmediatheken";
+"Yerel modeller" = "Lokale Modelle";
+"Yapay zekâ aracı verileri" = "KI-Werkzeugdaten";
+"Alt grup" = "Untergruppe";
+"Ölçülen alan" = "Gemessener Speicher";
+"Şu anda taşınabilir: %lld öğe · %@" = "Jetzt verschiebbar: %lld Objekte · %@";
+"Clang modül önbelleği" = "Clang-Modulcache";
+"Bu derleme çıktılarının Xcode çalışma alanı artık bulunamıyor." = "Der Xcode-Arbeitsbereich für diese Build-Ausgaben wurde nicht gefunden.";
+"Çalışma alanı bulunamadı. Yalnızca Xcode’un derleme ara çıktıları Çöp’e taşınır." = "Der Arbeitsbereich wurde nicht gefunden. Nur die Xcode-Zwischenergebnisse werden in den Papierkorb verschoben.";

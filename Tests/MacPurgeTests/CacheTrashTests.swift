@@ -6,10 +6,13 @@ import Testing
 @testable import MacPurgeCore
 
 extension CacheTrash {
-  func applyAfterTestConfirmation(_ plan: TrashPlan) async throws -> TrashOutcome {
+  func applyAfterTestConfirmation(
+    _ plan: TrashPlan, acknowledgedReview: Bool = false
+  ) async throws -> TrashOutcome {
     var preview: TrashPlan? = plan
     let accepted = try #require(
-      ConfirmedTrashPlan(confirming: plan.id, preview: &preview, currentReportID: plan.reportID))
+      ConfirmedTrashPlan(confirming: plan.id, preview: &preview, currentReportID: plan.reportID,
+        acknowledgedReview: acknowledgedReview))
     return await apply(accepted)
   }
 }
@@ -275,6 +278,53 @@ struct CacheTrashTests {
     #expect(await unknown.prepare(items: rows, reportID: id, projects: []).targets.isEmpty)
   }
 
+  @Test func appCacheRechecksUseAndContentsAndCanRestore() async throws {
+    actor Running {
+      var file: String?
+      func open(_ path: String?) { file = path }
+      func listing() -> String { "p73\nn" + (file ?? "/bin/sh") + "\n" }
+    }
+    let f = try Fixture()
+    defer { f.finish() }
+    let running = Running()
+    let engine = CacheTrash(home: f.home, journal: f.journal, developmentUse: {
+      try await DevelopmentCacheUse(processList: "73 1 \(getuid()) /bin/sh",
+        openFiles: running.listing())
+    })
+    let browser = f.home.appending(path: "Library/Application Support/Chromium")
+    let cache = browser.appending(path: "Default/Cache")
+    try f.write(cache.appending(path: "Cache_Data"))
+    try f.write(browser.appending(path: "Default/Service Worker/CacheStorage"))
+    let marker = browser.appending(path: "Local State")
+    try Data("{}".utf8).write(to: marker)
+    var row = try f.row(cache, category: ScanGroup.appCaches.rawValue)
+    row.profile = .appCache
+    let id = UUID()
+    let plan = await engine.prepare(items: [row], reportID: id, projects: [])
+    #expect(plan.targets.count == 1)
+
+    await running.open(cache.appending(path: "Cache_Data/payload").path)
+    let availability = try await engine.availability(for: [row], projects: [], reportID: id)
+    #expect(availability[row.id] != .ready)
+    #expect(try await engine.applyAfterTestConfirmation(plan).moved.isEmpty)
+
+    await running.open(nil)
+    try FileManager.default.removeItem(at: marker)
+    #expect(await engine.prepare(items: [row], reportID: id, projects: []).targets.isEmpty)
+    try Data("{}".utf8).write(to: marker)
+    let offline = cache.appending(path: "Cache_Data/IndexedDB")
+    try f.write(offline)
+    #expect(await engine.prepare(items: [row], reportID: id, projects: []).targets.isEmpty)
+    try FileManager.default.removeItem(at: offline)
+
+    let fresh = await engine.prepare(items: [row], reportID: id, projects: [])
+    let moved = try await engine.applyAfterTestConfirmation(fresh)
+    let receipt = try #require(moved.moved.first)
+    #expect(FileManager.default.fileExists(atPath: browser.appending(path: "Default/Service Worker").path))
+    _ = try await engine.restore(receipt.id)
+    #expect(FileManager.default.fileExists(atPath: cache.path))
+  }
+
   @Test func packageProcessListingDistinguishesCommandsAndNodeScripts() {
     for busy in [
       "npm install", "npx", "/opt/homebrew/bin/npm ci",
@@ -419,8 +469,8 @@ struct CacheTrashTests {
       try PropertyListEncoder().encode(["WorkspacePath": path]).write(to: plist, options: .atomic)
     }
     try attribute(workspace.path)
-    #expect(try await ProjectAttribution.outputRoots(home: f.home, selected: [logs]).isEmpty)
-    let roots = try await ProjectAttribution.outputRoots(home: f.home, selected: [project])
+    #expect(try await ProjectAttribution.outputRoots(home: f.home, selected: [output]).isEmpty)
+    let roots = try await ProjectAttribution.outputRoots(home: f.home, selected: [])
     let root = try #require(roots.first)
     #expect(roots.count == 1 && root.url == output)
     let measured = try await StorageMeter.measure(root)
@@ -434,10 +484,9 @@ struct CacheTrashTests {
       extended: false, homeDevice: measured.measuredDevice)
     let item = try #require(report.items.first)
     let engine = f.store()
-    #expect(await engine.prepare(items: [item], reportID: report.id, projects: []).targets.isEmpty)
-    let states = try await engine.availability(for: [item], projects: [project])
+    let states = try await engine.availability(for: [item], projects: [])
     #expect(states[item.id] == .ready)
-    let plan = await engine.prepare(items: [item], reportID: report.id, projects: [project])
+    let plan = await engine.prepare(items: [item], reportID: report.id, projects: [])
     #expect(plan.targets.map(\.path.path) == [output.path])
     let busy = CacheTrash(home: f.home, journal: f.journal, xcodeIdle: { false })
     #expect(try await busy.availability(for: [item], projects: [project])[item.id] != .ready)

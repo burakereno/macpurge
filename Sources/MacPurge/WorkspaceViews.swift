@@ -1,17 +1,27 @@
 import SwiftUI
+#if SWIFT_PACKAGE
+import MacPurgeCore
+#endif
 
 struct Overview: View {
     let demo: Demo
     @State private var showCoverage = false
     var body: some View {
-        Page {
-            PageTitle(kicker: "Çalışma alanı", title: "Genel bakış", subtitle: "Diskindeki alanın hangi projelere ve araçlara ait olduğunu gör.")
-            DiskView(freeMB: demo.freeMB, safeMB: demo.availableMB)
-            if demo.trashMB > 0 {
+        Page(overviewLayout: true) {
+            PageTitle(title: "Genel bakış")
+        } content: {
+            let disk = VolumeReading(name: "Macintosh HD", bytes: 512_000_000_000,
+                free: Int64(demo.freeMB) * 1_000_000)
+            let safe = Int64(demo.availableMB) * 1_000_000
+            DiskBreakdownView(disk: disk, breakdown: DiskBreakdown(reading: disk,
+                sizes: [.xcode: .bytes(safe, lowerBound: false),
+                    .machines: .bytes(30_000_000_000, lowerBound: false)],
+                safeBytes: safe, safeByGroup: [.xcode: safe]))
+            if let receipt = demo.receipts.first(where: { !$0.restored }) {
                 Button {
-                    demo.show(.activity)
+                    demo.path.append(.receipt(receipt.id))
                 } label: {
-                    Label("\(diskAmount(demo.trashMB)) örnek Çöp’te bekliyor · Etkinliği gör", systemImage: "trash")
+                    Label("\(diskAmount(demo.trashMB)) örnek Çöp’te bekliyor · Son işlemi gör", systemImage: "trash")
                 }.buttonStyle(.link)
             }
             VStack(spacing: 10) {
@@ -45,7 +55,8 @@ struct Projects: View {
     let demo: Demo
     var body: some View {
         Page {
-            PageTitle(kicker: "Çalışma alanı", title: "Projeler", subtitle: "Bir projeyi seçerek kaynaklarıyla derleme çıktılarını birlikte incele.")
+            PageTitle(title: "Projeler")
+        } content: {
             InventoryList(["project"], id: \.self) { _ in
                 ActionRow(symbol: "hammer", tint: Ink.sea, title: "Atlas Studio", description: "macOS uygulaması · Swift ve Xcode", amount: diskAmount(demo.availableMB), action: demo.openProject)
             }
@@ -53,31 +64,15 @@ struct Projects: View {
     }
 }
 
-struct Activity: View {
-    let demo: Demo
-    var body: some View {
-        Page {
-            PageTitle(kicker: "Çalışma alanı", title: "Etkinlik", subtitle: "Bu oturumdaki örnek işlemler ve sonuçları.")
-            if demo.receipts.isEmpty {
-                ContentUnavailableView("Henüz işlem yok", systemImage: "clock", description: Text("Bir işlem planı uyguladığında sonucunu burada görebilirsin."))
-                    .padding(.vertical, 40).frame(maxWidth: .infinity)
-                Button("Genel bakışa git") { demo.show(.overview) }
-            } else {
-                InventoryList(demo.receipts) { receipt in
-                    let status = receipt.restored ? "Geri alındı" : "Örnek Çöp’e taşındı"
-                    ActionRow(symbol: receipt.restored ? "arrow.uturn.backward" : "trash", tint: Ink.sea,
-                        title: "Atlas Studio", description: "\(ReviewLanguage.text(status)) · \(receipt.date.reviewDate(date: .omitted, time: .shortened))",
-                        amount: diskAmount(receipt.mb)) { demo.path.append(.receipt(receipt.id)) }
-                }
-            }
-        }
-    }
-}
-
 struct MachineDetail: View {
+    let back: () -> Void
+
     var body: some View {
         Page {
-            PageTitle(kicker: "Depolama / Sanal makineler", title: "Laboratuvar VM", subtitle: "Bu disk imajı işletim sistemini ve sanal makinedeki kişisel dosyaları içeriyor.")
+            PageTitle(title: "Laboratuvar VM") {
+                WorkspaceBackButton(title: "Back", action: back)
+            }
+        } content: {
             Surface {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Sanal makine diski", systemImage: "cube").font(.headline)
@@ -93,9 +88,14 @@ struct MachineDetail: View {
 
 struct Goal: View {
     let demo: Demo
+    let back: () -> Void
+
     var body: some View {
         Page {
-            PageTitle(kicker: "Depolama / Alan hedefi", title: "20 GB için adaylar", subtitle: "Yeniden üretilebilir çıktılar hedefin yalnızca bir kısmını karşılıyor.")
+            PageTitle(title: "20 GB için adaylar") {
+                WorkspaceBackButton(title: "Back", action: back)
+            }
+        } content: {
             Surface {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {

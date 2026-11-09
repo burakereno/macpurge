@@ -55,36 +55,64 @@ enum ProjectAttribution {
   static let intermediates = "Build/Intermediates.noindex"
 
   // The plist identifies the workspace. A folder name or a project name alone is insufficient.
-  static func workspace(of derived: URL, selected: [URL]? = nil, expected: String? = nil) -> String?
-  {
+  private static func workspacePath(of derived: URL) -> String? {
     guard let data = SmallMetadata.read(derived.appending(path: "info.plist")),
       let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
         as? [String: Any],
       let path = plist["WorkspacePath"] as? String, path.hasPrefix("/"),
-      !path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." })
+      path.components(separatedBy: "/").dropFirst().allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
+      !ScanExclusions.current.contains(URL(fileURLWithPath: path))
     else { return nil }
-    if let selected, owningRoot(workspace: path, selected: selected) == nil { return nil }
-    if let expected, expected != path { return nil }
-    let url = URL(fileURLWithPath: path)
-    guard !ScanExclusions.current.contains(url) else { return nil }
-    let marker: String
+    return path
+  }
+
+  private static func workspaceMarker(for url: URL) -> String? {
     switch url.pathExtension {
-    case "xcworkspace": marker = "contents.xcworkspacedata"
-    case "xcodeproj": marker = "project.pbxproj"
-    default: return nil
+    case "xcworkspace": "contents.xcworkspacedata"
+    case "xcodeproj": "project.pbxproj"
+    default: nil
     }
+  }
+
+  private static func hasWorkspaceMarker(at url: URL) -> Bool {
+    guard let marker = workspaceMarker(for: url) else { return false }
     let fd = open(
       url.appending(path: marker).path, O_EVTONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
-    guard fd >= 0 else { return nil }
+    guard fd >= 0 else { return false }
     defer { close(fd) }
     var info = stat()
-    return fstat(fd, &info) == 0 && info.st_mode & S_IFMT == S_IFREG ? path : nil
+    return fstat(fd, &info) == 0 && info.st_mode & S_IFMT == S_IFREG
+  }
+
+  static func derivedFolder(for output: URL, home: URL) -> URL? {
+    let folder = output.deletingLastPathComponent().deletingLastPathComponent()
+    let base = home.appending(path: "Library/Developer/Xcode/DerivedData")
+    guard folder.deletingLastPathComponent().path == base.path,
+      folder.appending(path: intermediates).path == output.path
+    else { return nil }
+    return folder
+  }
+
+  static func outputWorkspace(
+    in derived: URL, home: URL, projects: [URL]
+  ) -> (path: String, profile: StorageProfile)? {
+    guard let path = workspacePath(of: derived),
+      !path.hasPrefix(home.appending(path: "Library/Developer/Xcode/DerivedData").path + "/")
+    else { return nil }
+    let local = path.hasPrefix(home.path + "/")
+    guard local || owningRoot(workspace: path, selected: projects) != nil else { return nil }
+    let url = URL(fileURLWithPath: path)
+    if hasWorkspaceMarker(at: url) { return (path, .xcodeIntermediate) }
+    // Treat only a missing local path as orphaned. Inaccessible projects and offline volumes are ambiguous.
+    guard local, workspaceMarker(for: url) != nil else { return nil }
+    let fd = open(path, O_EVTONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
+    if fd >= 0 { close(fd); return nil }
+    return errno == ENOENT ? (path, .xcodeOrphanBuild) : nil
   }
 
   @concurrent static func outputRoots(home: URL, selected: [URL], onDevice: dev_t? = nil)
     async throws -> [ScanRoot]
   {
-    guard !selected.isEmpty else { return [] }
     let base = home.appending(path: "Library/Developer/Xcode/DerivedData")
     let children: [DirectoryIndex.Entry]
     do {
@@ -97,7 +125,7 @@ enum ProjectAttribution {
     for child in children where child.directory {
       try Task.checkCancellation()
       if let root = outputRoot(
-        in: child.url, base: base, selected: selected, protection: protection)
+        in: child.url, home: home, selected: selected, protection: protection)
       {
         roots.append(root)
       }
@@ -106,19 +134,36 @@ enum ProjectAttribution {
   }
 
   static func outputRoot(
-    in derived: URL, base: URL, selected: [URL], protection: ProtectedProjects? = nil
+    in derived: URL, home: URL, selected: [URL], protection: ProtectedProjects? = nil
   ) -> ScanRoot? {
     let output = derived.appending(path: intermediates)
-    guard derived.deletingLastPathComponent().path == base.path,
-      let workspace = workspace(of: derived, selected: selected),
-      !workspace.hasPrefix(base.path + "/"),
+    guard derivedFolder(for: output, home: home) != nil,
+      let workspace = outputWorkspace(in: derived, home: home, projects: selected),
       !(protection ?? ProtectedProjects(selected)).containsProject(under: output),
       (try? TrashFiles.directory(output, enumerate: false) { _, _ in true }) == true
     else { return nil }
-    let project = URL(fileURLWithPath: workspace).deletingPathExtension().lastPathComponent
+    let project = URL(fileURLWithPath: workspace.path).deletingPathExtension().lastPathComponent
     return .init(
       group: .xcode, title: project + " · Derleme ara çıktıları",
-      url: output, profile: .xcodeIntermediate, workspace: workspace)
+      url: output, profile: workspace.profile, workspace: workspace.path)
+  }
+
+  @concurrent static func compilerCacheRoots(in home: URL, onDevice device: dev_t?) async throws -> [ScanRoot] {
+    let base = home.appending(path: "Library/Developer/Xcode/DerivedData")
+    let children = try DirectoryIndex.childrenIfReadable(of: base, onDevice: device) ?? []
+    let projects = children.filter {
+      $0.directory && !DevelopmentCache.xcodeLeaves.contains($0.url.lastPathComponent)
+    }.map(\.url)
+    return try ([base] + projects).flatMap { parent in
+      try Task.checkCancellation()
+      return DevelopmentCache.xcodeLeaves.compactMap { name -> ScanRoot? in
+        let url = parent.appending(path: name)
+        guard (try? TrashFiles.directory(url, enumerate: false, { _, info in
+          device == nil || info.st_dev == device
+        })) == true else { return nil }
+        return ScanRoot(group: .xcode, title: "Xcode · " + name, url: url, profile: .xcodeCompilerCache)
+      }
+    }
   }
 
   @concurrent static func derive(

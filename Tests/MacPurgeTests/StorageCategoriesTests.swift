@@ -171,6 +171,94 @@ struct StorageCategoriesTests {
     #expect(CategorySize.read(.models, in: nil) == .waiting)
   }
 
+  @Test func storageSectionsCoverTheInventoryAndKeepPartialTotals() {
+    #expect(StorageSection.allCases.count == 7)
+    #expect(StorageSection.containing(ScanGroup.appCaches.rawValue) == .appCaches)
+    for group in ScanGroup.allCases {
+      let sections = StorageSection.allCases.filter { section in
+        section.subgroups.contains { $0.groups.contains(group) }
+      }
+      #expect(sections.count == 1)
+      #expect(sections.first == StorageSection.containing(group.rawValue))
+    }
+    let report = ScanReport(id: UUID(), date: .now, extended: false, free: nil, capacity: nil,
+      items: [], groups: [ScanGroup.xcode.rawValue: 20, ScanGroup.packages.rawValue: 15])
+    #expect(StorageSection.development.size(in: report) == .bytes(35, lowerBound: true))
+    #expect(StorageSection.virtualization.size(in: report) == .outsideScope)
+  }
+
+  @Test func appCacheDiscoveryClaimsOnlyRecognizedPhysicalBoundaries() throws {
+    let fm = FileManager.default
+    let home = URL(filePath: "/private/tmp/macpurge-app-caches-" + UUID().uuidString)
+    defer { try? fm.removeItem(at: home) }
+    let base = home.appending(path: "Library/Application Support/Framer")
+    let cache = base.appending(path: "Partitions/framer/Cache")
+    let outer = home.appending(path: "Library/Caches/com.framer.electron")
+    let nested = base.appending(path: "Partitions/framer/Code Cache")
+    for path in [cache.appending(path: "Cache_Data"), outer, nested, base.appending(path: "Cache"),
+      base.appending(path: "Service Worker/CacheStorage"), home.appending(path: "Library/Caches/Mystery")]
+    {
+      try fm.createDirectory(at: path, withIntermediateDirectories: true)
+    }
+    try Data("{}".utf8).write(to: base.appending(path: "Partitions/framer/Network Persistent State"))
+    try fm.createSymbolicLink(at: base.appending(path: "Partitions/framer/GPUCache"), withDestinationURL: outer)
+    let claimed = ScanRoot(group: .tools, title: "Reserved", url: nested)
+    let roots = try AppCacheRule.discover(home: home, includeProtected: false,
+      volumes: ScanVolumes(home: home, projects: []), claimed: [claimed], apps: [])
+    #expect(Set(roots.map(\.url.path)) == [outer.path, cache.path])
+    #expect(roots.allSatisfy { $0.profile == .appCache && $0.evidence?.rule == "app-cache.com.framer.electron" })
+    let appData = ScanRoot(group: .apps, title: "Framer", url: base)
+    let partition = InventoryPartition.merging([appData], details: roots)
+    #expect(partition.first { $0.group == .apps }?.excludedDirectories == ["Partitions/framer/Cache"])
+  }
+
+  @Test func protectedCacheMeasurementsPreserveLatestRecordsAndStayReadOnly() async throws {
+    let fm = FileManager.default
+    let home = URL(filePath: "/private/tmp/macpurge-protected-caches-" + UUID().uuidString)
+    defer { try? fm.removeItem(at: home) }
+    let base = home.appending(path: ProtectedCacheInventory.coreDevicePath + "/com.example.app")
+    let device = UUID().uuidString
+    let old = base.appending(path: String(repeating: "a", count: 64) + "/" + device)
+    let latest = base.appending(path: String(repeating: "b", count: 64) + "/" + device)
+    let onlyForAnotherDevice = base.appending(path: String(repeating: "c", count: 64) + "/" + UUID().uuidString)
+    let telegram = home.appending(path: ProtectedCacheInventory.telegramPath)
+    let media = telegram.appending(path: "stable/account-1/postbox/media")
+    let linked = telegram.appending(path: "account-2/postbox")
+    for url in [old, latest, onlyForAnotherDevice, media, linked] {
+      try fm.createDirectory(at: url, withIntermediateDirectories: true)
+      try Data(repeating: 1, count: 8192).write(to: url.appending(path: "payload"))
+    }
+    try fm.createSymbolicLink(at: linked.appending(path: "media"), withDestinationURL: media)
+    let day: TimeInterval = 86_400
+    let now = Date.now
+    try fm.setAttributes([.modificationDate: now.addingTimeInterval(day * 3)],
+      ofItemAtPath: latest.path)
+    let volumes = ScanVolumes(home: home, projects: [])
+    let core = try ProtectedCacheInventory.coreDevice(home: home, volumes: volumes,
+      now: now.addingTimeInterval(day * 20))
+    #expect(core.map(\.url.path) == [old.path])
+    let mediaRows = try ProtectedCacheInventory.telegram(home: home, volumes: volumes, apps: [])
+    #expect(mediaRows.map(\.url.path) == [media.path])
+    #expect(core.first?.group == .tools && mediaRows.first?.group == .appCaches)
+    let partition = InventoryPartition.merging([
+      ScanRoot(group: .apps, title: "Telegram", url: telegram),
+    ], details: mediaRows)
+    #expect(partition.first { $0.group == .apps }?.excludedDirectories == ["stable/account-1/postbox/media"])
+    let roots = core + mediaRows
+    let sizes = try await StorageMeter.scan(roots.map(volumes.restrict), onStart: { _ in }, onFinish: { _, _, _ in })
+    #expect(sizes[.tools]?.bytes == 8192 && sizes[.appCaches]?.bytes == 8192)
+    let reportItems = roots.map { root in
+      ReportItem(id: root.id, name: root.title, category: root.group.rawValue, path: root.url.path,
+        bytes: 8192, status: "complete", safety: SafetyLevel.review.rawValue, reason: "",
+        basis: "allocated", eligibleBytes: 0, modified: nil, parts: [:],
+        volume: volumes.device(for: home), profile: root.profile, evidence: root.evidence)
+    }
+    let engine = CacheTrash(home: home, journal: home.appending(path: "receipts"))
+    let actions = try await engine.actions(for: reportItems, projects: [], reportID: UUID(),
+      readings: [:], manual: [:], restrictions: [:])
+    #expect(reportItems.allSatisfy { actions[$0.id]?.bytes == 0 && actions[$0.id]?.availability != .ready })
+  }
+
   @Test func rescanKeepsEachCategoryUntilItsNewMeasurementIsReady() {
     let scope = ScanReport.scopeKey(extended: true, protected: false, projects: [])
     func reading(_ group: ScanGroup, _ name: String, _ bytes: Int64) -> (ScanRoot, RootSize) {

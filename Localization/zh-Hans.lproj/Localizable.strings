@@ -2,7 +2,6 @@
 "Depolama" = "存储";
 "Proje klasörleri" = "项目文件夹";
 "Alan planı" = "空间计划";
-"Etkinlik" = "活动";
 "Çalışma alanı" = "工作区";
 "Salt okunur tarama" = "只读扫描";
 "Güvenli" = "安全";
@@ -50,6 +49,7 @@
 "Dil" = "语言";
 "Ayarlar" = "设置";
 "Tarama kapsamı" = "扫描范围";
+"Scan Disk" = "扫描磁盘";
 "Hızlı tarama" = "快速扫描";
 "Ayrıntılı tarama" = "详细扫描";
 "Yeniden tara" = "重新扫描";
@@ -273,7 +273,7 @@
 "These folders and everything inside them are skipped in quick and extended scans." = "快速扫描和详细扫描均会跳过这些文件夹及其全部内容。";
 "Remove exclusion" = "移除排除项";
 "Add folders…" = "添加文件夹…";
-"Activity history" = "活动历史记录";
+"Scan history" = "扫描历史记录";
 "Keep history" = "历史记录保留时间";
 "30 days" = "30 天";
 "90 days" = "90 天";
@@ -299,3 +299,22 @@
 "Updating…" = "正在更新…";
 "Update failed" = "更新失败";
 "OK" = "好";
+
+/* Storage groups and developer cache status */
+"Yapay zekâ" = "AI";
+"Sanal makineler ve konteynerler" = "虚拟机与容器";
+"Dosyalar" = "文件";
+"Sistem ve yedekler" = "系统与备份";
+"Araç verileri ve önbellekleri" = "工具数据与缓存";
+"Seçili projeler" = "所选项目";
+"Apple simülatörleri" = "Apple 模拟器";
+"Uygulamalar" = "应用程序";
+"Medya kitaplıkları" = "媒体资料库";
+"Yerel modeller" = "本地模型";
+"Yapay zekâ aracı verileri" = "AI 工具数据";
+"Alt grup" = "子组";
+"Ölçülen alan" = "已测量空间";
+"Şu anda taşınabilir: %lld öğe · %@" = "现在可移动：%lld 项 · %@";
+"Clang modül önbelleği" = "Clang 模块缓存";
+"Bu derleme çıktılarının Xcode çalışma alanı artık bulunamıyor." = "找不到这些构建输出对应的 Xcode 工作区。";
+"Çalışma alanı bulunamadı. Yalnızca Xcode’un derleme ara çıktıları Çöp’e taşınır." = "找不到工作区。仅将 Xcode 构建中间文件移到废纸篓。";

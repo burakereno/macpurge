@@ -128,21 +128,27 @@ struct PermanentCleanupSheet: View {
         Text(operation.warning)
         HStack {
           Spacer()
-          Button("Vazgeç") { dismiss() }.keyboardShortcut(.cancelAction)
+          Button("Vazgeç") { dismiss() }
+            .workspaceButton(.secondary)
+            .keyboardShortcut(.cancelAction)
           Button("I Understand") { review.acknowledge() }
+            .workspaceButton()
         }
       case .confirmation:
         Text(operation.confirmation)
         HStack {
           Spacer()
-          Button("Vazgeç") { dismiss() }.keyboardShortcut(.cancelAction)
+          Button("Vazgeç") { dismiss() }
+            .workspaceButton(.secondary)
+            .keyboardShortcut(.cancelAction)
           Button(operation.confirmButton, role: .destructive) {
             scan.cleanup.confirmPermanentCleanup(review, scan: scan)
           }
+          .workspaceButton(.destructive)
         }
       case .clearing:
         HStack {
-          ProgressView().controlSize(.small)
+          WorkspaceActivityIndicator()
           Text(
             ReviewLanguage.text(
               operation == .systemLogs ? "Clearing system logs…" : "Erasing simulator…"))
@@ -151,7 +157,9 @@ struct PermanentCleanupSheet: View {
         Text(message).textSelection(.enabled)
         HStack {
           Spacer()
-          Button("Bitti") { dismiss() }.keyboardShortcut(.defaultAction)
+          Button("Bitti") { dismiss() }
+            .workspaceButton()
+            .keyboardShortcut(.defaultAction)
         }
       }
     }

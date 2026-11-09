@@ -180,7 +180,7 @@ struct MacPurgeShortcuts: AppShortcutsProvider {
 
 @MainActor
 final class NoticeDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
-  var showActivity: (() -> Void)?
+  var showStorage: (() -> Void)?
   var showSettings: (() -> Void)?
   var showWorkspace: (() -> Void)?
 
@@ -232,7 +232,7 @@ final class NoticeDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
     _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
   ) async {
     guard response.notification.request.identifier == "macpurge.storage" else { return }
-    await MainActor.run { self.showActivity?() }
+    await MainActor.run { self.showStorage?() }
   }
 }
 

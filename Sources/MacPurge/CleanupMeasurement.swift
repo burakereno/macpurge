@@ -24,7 +24,9 @@ struct CleanupMeasurement {
     let caseInsensitive: Bool
 
     init(home: URL, trash: URL, devices: [ScanRoot], catalog: [ScanRoot]) {
-      var paths = catalog.filter { $0.profile.assessment(for: .complete)?.level == .safe }.map(
+      var paths = catalog.filter {
+        $0.profile == .npxEntry || $0.profile.assessment(for: .complete)?.level == .safe
+      }.map(
         \.url)
       paths.append(trash.appending(path: "{receipt}"))
       paths.append(
@@ -103,6 +105,7 @@ struct CleanupMeasurement {
       let collections = [products, xcode.appending(path: "Archives").path]
       for receipt in receipts {
         guard let review = receipt.review,
+          !review.profile.isMissingWorkspaceOutput,
           (review.profile.isProjectOutput ? review.inCurrentProjects(projects)
             : review.scope != nil && review.scope == prior?.scope),
           let group = ScanGroup(rawValue: review.category),
@@ -135,6 +138,10 @@ struct CleanupMeasurement {
           root.projectOwner = owner
           patch.roots[index].excludedDirectories.insert(String(review.path.dropFirst(parent.url.path.count + 1)))
         }
+        if review.profile == .npxEntry,
+          let index = patch.roots.firstIndex(where: { $0.url.path == receipt.original.deletingLastPathComponent().path }) {
+          patch.roots[index].excludedDirectories.insert(receipt.original.lastPathComponent)
+        }
         root.expectedDevice = review.device
         patch.roots.append(root)
       }
@@ -145,6 +152,16 @@ struct CleanupMeasurement {
       let base = patch.roots[i].url
       for receipt in receipts {
         let output = receipt.original
+        if restored, output.path.hasPrefix(base.path + "/"),
+          case .compiler(let name) = DevelopmentCache.at(output, home: home),
+          !patch.roots.contains(where: { $0.url.path == output.path })
+        {
+          var root = ScanRoot(group: .xcode, title: "Xcode · " + name, url: output, profile: .xcodeCompilerCache)
+          root.expectedDevice = patch.roots[i].expectedDevice
+          patch.roots.append(root)
+          patch.roots[i].excludedDirectories.insert(String(output.path.dropFirst(base.path.count + 1)))
+          continue
+        }
         let folder = output.deletingLastPathComponent().deletingLastPathComponent()
         guard folder.deletingLastPathComponent().path == base.path,
           output.path == folder.appending(path: ProjectAttribution.intermediates).path
@@ -152,13 +169,14 @@ struct CleanupMeasurement {
         artifactFolders.insert(folder.lastPathComponent)
         // A full scan while the output was in the Trash has no row for it.
         if restored,
-          !patch.roots.contains(where: {
-            $0.url.path == output.path && $0.profile == .xcodeIntermediate
-          }),
-          var root = ProjectAttribution.outputRoot(in: folder, base: base, selected: projects)
+          var root = ProjectAttribution.outputRoot(in: folder, home: home, selected: projects)
         {
           root.expectedDevice = patch.roots[i].expectedDevice
-          patch.roots.append(root)
+          if let index = patch.roots.firstIndex(where: { $0.id == root.id }) {
+            patch.roots[index] = root
+          } else {
+            patch.roots.append(root)
+          }
           patch.roots[i].excludedDirectories.insert(
             folder.lastPathComponent + "/" + ProjectAttribution.intermediates)
         }
@@ -344,7 +362,8 @@ struct CleanupMeasurement {
         id: UUID(), date: prior.date, extended: prior.extended, free: disk?.free,
         capacity: disk?.bytes, items: items.sorted { ($0.bytes ?? -1) > ($1.bytes ?? -1) },
         groups: groups, groupSafety: safety, measuredGroupBytes: safety.mapValues(\.total),
-        scope: prior.scope)
+        scope: prior.scope,
+        applications: prior.applications == nil ? nil : try ApplicationInventory.footprints(roots: patch.roots, results: patch.results))
     }
     return patch
   }

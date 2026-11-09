@@ -29,6 +29,9 @@ struct ReportItem: Identifiable, Codable, Hashable, Sendable {
   var measuredAt: Date? = nil
   var containsExcludedFolders: Bool? = nil
   var sharedLinkBytes: Int64? = nil
+  var profile: StorageProfile? = nil
+  var evidence: InventoryEvidence? = nil
+  var application: ApplicationIdentity? = nil
   var reclaimableBytes: Int64 { max(0, (bytes ?? 0) - (sharedLinkBytes ?? 0)) }
 
   var complete: Bool { status == "complete" }
@@ -51,6 +54,7 @@ struct ReportItem: Identifiable, Codable, Hashable, Sendable {
   var estimated: Bool { basis == "tool" }
   var safePlanCandidate: Bool {
     complete && basis == "allocated" && safety == SafetyLevel.safe.rawValue && eligibleBytes > 0
+      && evidence?.inspectionOnly != true
   }
   var shortPath: String { (path as NSString).abbreviatingWithTildeInPath }
 }
@@ -67,11 +71,12 @@ struct ScanReport: Identifiable, Codable, Sendable {
   var measuredGroupBytes: [String: Int64]? = nil  // Includes lower bounds; older reports lack this field.
 
   var scope: String? = nil  // Old snapshots can be viewed, but do not describe their full scan scope.
+  var applications: [ApplicationFootprint]? = nil
 
   static func scopeKey(extended: Bool, protected: Bool, projects: [URL], exclusions: [String] = []) -> String {
     let fields =
       [
-        "storage-v2", extended ? "detailed" : "quick",
+        "storage-v6", extended ? "detailed" : "quick",
         extended && protected ? "protected" : "standard",
       ] + projects.map(\.path).sorted()
       + (exclusions.isEmpty ? [] : ["exclusions"] + exclusions.sorted())
@@ -144,19 +149,24 @@ struct ScanReport: Identifiable, Codable, Sendable {
           assessment?.level == .safe && result.state == .complete && basis == "allocated"
           && (profile != .simulatorCache || root.device != nil)
           && homeDevice != nil && homeDevice == result.measuredDevice
+        var evidence = root.evidence
+        if let allocation = evidence?.privateAllocation, bytes != allocation.allocated || result.state != .complete {
+          evidence?.privateAllocation = nil
+        }
         items.append(
           .init(
             id: key, name: name, category: root.group.rawValue, path: root.url.path, bytes: bytes,
             status: state,
             safety: assessment?.level.rawValue, reason: reason, basis: basis,
-            eligibleBytes: eligible && !root.containsScanExclusions ? max(0, candidate) : 0,
+            eligibleBytes: eligible && !root.containsScanExclusions && root.evidence?.inspectionOnly != true ? max(0, candidate) : 0,
             modified: result.modified, parts: parts, volume: result.measuredDevice,
             simulatorDataDevice: profile == .simulatorData ? root.device : nil,
             workspace: root.workspace, runtimeUsage: root.runtimeUsage,
             directoryInode: result.measuredInode, age: result.measured ? result.age : nil,
             containsExcludedFolders: root.containsScanExclusions ? true : nil,
             sharedLinkBytes: profile == .simulatorData
-              ? min(bytes ?? 0, result.sharedLinkBytes) : max(0, (bytes ?? 0) - candidate)))
+              ? min(bytes ?? 0, result.sharedLinkBytes) : max(0, (bytes ?? 0) - candidate),
+            profile: profile, evidence: evidence, application: root.application))
       }
       let parts = Dictionary(
         uniqueKeysWithValues: result.largestFive.map { ($0.key, $0.value) })
@@ -315,7 +325,7 @@ actor ScanReportBuilder {
     roots: [ScanRoot], results: [String: RootSize], sizes: [ScanGroup: GroupSize],
     pending: Set<ScanGroup>, simulatorListIncomplete: Bool,
     last: ScanReport?, final: Bool = false
-  ) -> ScanReport {
+  ) throws -> ScanReport {
     var groups: [String: Int64] = [:]
     var incomplete = pending
     if simulatorListIncomplete { incomplete.insert(.simulators) }
@@ -328,12 +338,21 @@ actor ScanReportBuilder {
     for group in incomplete { groups.removeValue(forKey: group.rawValue) }
     var safety: [String: SafetyBreakdown] = [:]
     for (group, size) in sizes { safety[group.rawValue] = size.breakdown }
+    let applicationsByPath = Dictionary(roots.compactMap { root in
+      root.application.map { (root.url.path, $0) }
+    }, uniquingKeysWith: { first, _ in first })
+    let attributed = final ? items.map { row in
+      var row = row
+      row.application = applicationsByPath[row.path] ?? row.application
+      return row
+    } : items
     let report = ScanReport(
       id: id, date: .now, extended: extended, free: disk?.free,
       capacity: disk?.bytes,
-      items: final ? items.sorted { ($0.bytes ?? -1) > ($1.bytes ?? -1) } : items,
+      items: final ? attributed.sorted { $0.bytes == $1.bytes ? $0.id < $1.id : ($0.bytes ?? -1) > ($1.bytes ?? -1) } : attributed,
       groups: groups, groupSafety: safety, measuredGroupBytes: safety.mapValues(\.total),
-      scope: scope)
+      scope: scope,
+      applications: final && extended ? try ApplicationInventory.footprints(roots: roots, results: results) : nil)
     return report.retainingPending(pending, from: last)
   }
 }
@@ -617,9 +636,6 @@ actor HistoryIO {
   }
 
   func prune(retention: ActivityRetention) throws { try archive.prune(retention: retention) }
-  func weeklyGrowth(ending report: ScanReport) throws -> WeeklyGrowth {
-    try archive.weeklyGrowth(ending: report)
-  }
   func record(_ report: ScanReport, retention: ActivityRetention = .saved()) throws {
     try archive.save(report, retention: retention)
   }

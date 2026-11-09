@@ -24,6 +24,7 @@ ditto "$derived/Build/Products/Release/$APP_BUNDLE_NAME" "$app"
 widget="$app/Contents/PlugIns/MacPurgeWidget.appex"
 test -x "$widget/Contents/MacOS/MacPurgeWidget"
 test -f "$app/Contents/Resources/Metadata.appintents/extract.actionsdata"
+test -f "$app/Contents/Resources/THIRD-PARTY-NOTICES"
 codesign --force --sign "$identity" --options runtime --timestamp --entitlements Packaging/widget-entitlements.plist "$widget"
 codesign --force --sign "$identity" --options runtime --timestamp --entitlements Packaging/app-entitlements.plist "$app"
 for bundle in "$widget" "$app"; do

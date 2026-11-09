@@ -2,7 +2,6 @@
 "Depolama" = "Stockage";
 "Proje klasörleri" = "Dossiers de projet";
 "Alan planı" = "Plan d’espace";
-"Etkinlik" = "Activité";
 "Çalışma alanı" = "Espace de travail";
 "Salt okunur tarama" = "Analyse en lecture seule";
 "Güvenli" = "Sûr";
@@ -50,6 +49,7 @@
 "Dil" = "Langue";
 "Ayarlar" = "Réglages";
 "Tarama kapsamı" = "Périmètre d’analyse";
+"Scan Disk" = "Analyser le disque";
 "Hızlı tarama" = "Analyse rapide";
 "Ayrıntılı tarama" = "Analyse détaillée";
 "Yeniden tara" = "Analyser à nouveau";
@@ -273,7 +273,7 @@
 "These folders and everything inside them are skipped in quick and extended scans." = "Ces dossiers et tout leur contenu sont ignorés lors des analyses rapides et approfondies.";
 "Remove exclusion" = "Supprimer l’exclusion";
 "Add folders…" = "Ajouter des dossiers…";
-"Activity history" = "Historique d’activité";
+"Scan history" = "Historique des analyses";
 "Keep history" = "Conserver l’historique";
 "30 days" = "30 jours";
 "90 days" = "90 jours";
@@ -299,3 +299,22 @@
 "Updating…" = "Mise à jour…";
 "Update failed" = "Échec de la mise à jour";
 "OK" = "OK";
+
+/* Storage groups and developer cache status */
+"Yapay zekâ" = "IA";
+"Sanal makineler ve konteynerler" = "Machines virtuelles et conteneurs";
+"Dosyalar" = "Fichiers";
+"Sistem ve yedekler" = "Système et sauvegardes";
+"Araç verileri ve önbellekleri" = "Données et caches des outils";
+"Seçili projeler" = "Projets sélectionnés";
+"Apple simülatörleri" = "Simulateurs Apple";
+"Uygulamalar" = "Applications";
+"Medya kitaplıkları" = "Bibliothèques multimédias";
+"Yerel modeller" = "Modèles locaux";
+"Yapay zekâ aracı verileri" = "Données des outils d’IA";
+"Alt grup" = "Sous-groupe";
+"Ölçülen alan" = "Espace mesuré";
+"Şu anda taşınabilir: %lld öğe · %@" = "Déplaçables maintenant : %lld éléments · %@";
+"Clang modül önbelleği" = "Cache de modules Clang";
+"Bu derleme çıktılarının Xcode çalışma alanı artık bulunamıyor." = "L’espace de travail Xcode associé à ces fichiers de compilation est introuvable.";
+"Çalışma alanı bulunamadı. Yalnızca Xcode’un derleme ara çıktıları Çöp’e taşınır." = "L’espace de travail est introuvable. Seuls les fichiers de compilation intermédiaires de Xcode seront placés dans la corbeille.";

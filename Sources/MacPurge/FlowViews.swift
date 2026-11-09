@@ -2,9 +2,14 @@ import SwiftUI
 
 struct ProjectDetail: View {
     let demo: Demo
+    let back: () -> Void
+
     var body: some View {
         Page {
-            PageTitle(kicker: "Projeler / Xcode", title: "Atlas Studio", subtitle: "macOS uygulaması · Son derleme 12 gün önce")
+            PageTitle(title: "Atlas Studio") {
+                WorkspaceBackButton(title: "Back", action: back)
+            }
+        } content: {
             Surface {
                 HStack(spacing: 13) {
                     SymbolTile(symbol: "folder", tint: Ink.sky)
@@ -64,9 +69,14 @@ private struct OutputChoice: View {
 
 struct Review: View {
     let demo: Demo
+    let back: () -> Void
+
     var body: some View {
         Page {
-            PageTitle(kicker: "Proje / Önizleme", title: "İşlem planı", subtitle: "Seçtiğin çıktılar örnek Çöp’e taşınacak. İşlemi sonuç ekranından geri alabilirsin.")
+            PageTitle(title: "İşlem planı") {
+                WorkspaceBackButton(title: "Back", action: back)
+            }
+        } content: {
             VStack(alignment: .leading, spacing: 14) {
                 SectionHead(title: "Çöp’e taşınacaklar", note: ReviewLanguage.format("%lld çıktı", Int64(demo.draft.count)))
                 InventoryList(demo.draft.sorted { $0.mb > $1.mb }) { item in
@@ -84,6 +94,7 @@ struct Review: View {
             }
             HStack {
                 Button("Seçime dön") { _ = demo.path.popLast() }
+                    .workspaceButton(.secondary)
                 Spacer()
                 MainAction(title: "Örnek Çöp’e taşı", symbol: "trash", action: demo.apply)
                     .disabled(demo.draft.isEmpty)
@@ -96,10 +107,14 @@ struct Review: View {
 struct ResultView: View {
     let receipt: Receipt
     let demo: Demo
+    let back: () -> Void
+
     var body: some View {
         Page {
-            PageTitle(kicker: "Proje / İşlem sonucu", title: receipt.restored ? "İşlem geri alındı" : "İşlem tamamlandı",
-                      subtitle: receipt.restored ? "Seçtiğin çıktılar örnek projedeki yerlerine döndü." : ReviewLanguage.format("%lld derleme çıktısı örnek Çöp’e taşındı.", Int64(receipt.outputs.count)))
+            PageTitle(title: receipt.restored ? "İşlem geri alındı" : "İşlem tamamlandı") {
+                WorkspaceBackButton(title: "Back", action: back)
+            }
+        } content: {
             Surface {
                 VStack(alignment: .leading, spacing: 16) {
                     Label(receipt.restored ? "Yerine dönen" : "Çöp’e taşınan", systemImage: receipt.restored ? "arrow.uturn.backward" : "trash")
@@ -118,7 +133,8 @@ struct ResultView: View {
             }
             HStack {
                 if !receipt.restored {
-                    Button("Geri al") { demo.restore(receipt.id) }.controlSize(.large)
+                    Button("Geri al") { demo.restore(receipt.id) }
+                        .workspaceButton(.secondary)
                 }
                 Spacer()
                 MainAction(title: "Genel bakışa dön", symbol: "square.grid.2x2") { demo.show(.overview) }

@@ -7,7 +7,11 @@ import WidgetKit
   import MacPurgeCore
 #endif
 
-enum ScanPhase: Equatable { case idle, running, cancelled, finished }
+enum ScanPhase: Equatable {
+  case idle, running, cancelled, finished
+
+  var awaitsMeasurements: Bool { self == .idle || self == .running }
+}
 
 enum ScanProgressStage {
   case discovering
@@ -56,6 +60,7 @@ enum ScanProgressStage {
   private(set) var historyError: String?
   @ObservationIgnored private var loadedHistory = false
   private(set) var volume: VolumeReading?
+  private(set) var volumeDevice: Int32?
   private(set) var simulatorInventory: SimulatorInventory?
   private(set) var projectDiscovery = ProjectDiscovery()
   var protectedProjects: [URL] {
@@ -82,6 +87,11 @@ enum ScanProgressStage {
   }
 
   func listMoveState(_ item: ReportItem?) -> MoveAvailability { action(for: item).availability }
+
+  func wasCleanupCandidate(_ item: ReportItem) -> Bool {
+    if phase == .finished { return listMoveState(item) == .ready }
+    return previousActions[item.id]?.availability == .ready
+  }
 
   // Keep filtered rows visible while remeasuring, but never authorize from the prior scan.
   func filterRisk(for item: ReportItem) -> SafetyLevel? {
@@ -150,8 +160,10 @@ enum ScanProgressStage {
   }
 
   func categorySelectionLabel(_ eligible: [ReportItem]) -> String {
-    if phase != .finished || actions.isEmpty { return ReviewLanguage.text("Ölçüm bekleniyor") }
-    return String(format: ReviewLanguage.text("Taşınabilir: %lld öğe · %@"),
+    if phase != .finished || (actions.isEmpty && report?.items.isEmpty == false) {
+      return ReviewLanguage.text("Ölçüm bekleniyor")
+    }
+    return String(format: ReviewLanguage.text("Şu anda taşınabilir: %lld öğe · %@"),
       Int64(eligible.count), byteLabel(cleanupBytes(eligible)))
   }
 
@@ -401,7 +413,9 @@ enum ScanProgressStage {
     generation = token
     let home = self.home
     let exclusions = ScanExclusions(paths: excludedFolders.map(\.path))
-    let catalog = ScanRoot.catalog(home: home, projects: projects).compactMap(exclusions.applying)
+    var locations = ScanRoot.catalog(home: home, projects: projects)
+    if let clang = ExtendedInventory.clangModuleCache(home: home) { locations.append(clang) }
+    let catalog = locations.compactMap(exclusions.applying)
     let extended = detailed
     let selectedProjects = projects
     let includeProtected = defaults.bool(forKey: "scanProtectedLocations")
@@ -453,6 +467,7 @@ enum ScanProgressStage {
         let disk = await VolumeReading.read(at: home)
         guard generation == token, !Task.isCancelled else { return }
         volume = disk
+        volumeDevice = volumes.device(for: home)
         do {
           let devices = home.appending(path: "Library/Developer/CoreSimulator/Devices")
           let inventory = try await SimulatorInventory.discover(
@@ -478,17 +493,24 @@ enum ScanProgressStage {
             home: home, selected: protected,
             onDevice: volumes.device(for: home.appending(path: "Library/Developer/Xcode/DerivedData"))
           )
+          let compilerCaches = try await ProjectAttribution.compilerCacheRoots(
+            in: home, onDevice: volumes.device(for: home.appending(path: "Library/Developer/Xcode/DerivedData")))
+          let npx = home.appending(path: ScanRoot.npxCachePath)
+          let npxEntries = try await DevelopmentCache.npxRoots(in: home, onDevice: volumes.device(for: npx))
           guard generation == token, !Task.isCancelled else { return }
           let boundaries = CleanupMeasurement.Boundaries(
             home: home, trash: cleanup.engine.trash,
-            devices: inventory.roots, catalog: catalog)
+            devices: inventory.roots, catalog: catalog + compilerCaches + npxEntries)
           let partitioned = catalog.filter { $0.group != .projects } + projectInventory.roots
-          var quick = (partitioned + inventory.roots + deviceStatus + outputs).map(volumes.restrict).map(
+          var quick = (partitioned + inventory.roots + deviceStatus + outputs + compilerCaches + npxEntries).map(volumes.restrict).map(
             boundaries.partition).compactMap(exclusions.applying)
           if let index = quick.firstIndex(where: { $0.profile == .xcodeWorkspace }) {
             let prefix = quick[index].url.path + "/"
             quick[index].excludedDirectories.formUnion(
-              outputs.map { String($0.url.path.dropFirst(prefix.count)) })
+              (outputs + compilerCaches).map { String($0.url.path.dropFirst(prefix.count)) })
+          }
+          if let index = quick.firstIndex(where: { $0.url.path == npx.path }) {
+            quick[index].excludedDirectories.formUnion(npxEntries.map { $0.url.lastPathComponent })
           }
           let dev = volumes.device(for: home)
           let builder = ScanReportBuilder(
@@ -499,7 +521,7 @@ enum ScanProgressStage {
             try Task.checkCancellation()
             await builder.append(batch, results: results)
             guard recordsHistory else { return }
-            let preview = await builder.snapshot(
+            let preview = try await builder.snapshot(
               roots: roots, results: results, sizes: sizes,
               pending: pending, simulatorListIncomplete: inventory.note != nil, last: last)
             try Task.checkCancellation()
@@ -602,7 +624,12 @@ enum ScanProgressStage {
             guard generation == token, !Task.isCancelled else { return }
             projectArtifacts = artifacts
           }
-          let snapshot = await builder.snapshot(
+          if extended {
+            let identities = Set(roots.compactMap(\.application))
+            let index = ApplicationDiscovery(apps: identities.sorted { $0.path < $1.path }, roots: [])
+            roots = roots.map { index.attributing($0, home: home) }
+          }
+          let snapshot = try await builder.snapshot(
             roots: roots, results: results, sizes: totals,
             pending: [], simulatorListIncomplete: inventory.note != nil, last: nil, final: true)
           guard generation == token, !Task.isCancelled else { return }

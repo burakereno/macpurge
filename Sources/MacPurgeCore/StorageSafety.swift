@@ -13,14 +13,21 @@ package struct SafetyAssessment: Equatable, Sendable {
 package enum StorageProfile: String, Codable, Sendable {
   case npmCache, goBuildCache, xcodeWorkspace, packageDownloads, sharedDependencies, uvCache,
     project, projectOutput, projectCache, projectBuild, projectGradleCache, gradleCache, unknown
-  case simulatorCache, simulatorData, xcodeIntermediate, verifiedDownloads, unrecognizedDownloads
-  case logs, personal, systemManaged, renderCache
+  case simulatorCache, simulatorData, xcodeIntermediate, xcodeOrphanIntermediate
+  case xcodeOrphanBuild
+  case verifiedDownloads, unrecognizedDownloads
+  case npxEntry, xcodeCompilerCache, clangModuleCache, expoDownloadCache
+  case logs, personal, systemManaged, renderCache, appCache
 
   package static let gradleCacheReason =
     "Gradle önbelleği. Silince sonraki derlemede yeniden oluşur. Gerekli bağımlılıklar tekrar indirilir."
 
   package var isProjectOutput: Bool {
     self == .projectOutput || self == .projectCache || self == .projectBuild || self == .projectGradleCache
+  }
+
+  package var isMissingWorkspaceOutput: Bool {
+    self == .xcodeOrphanBuild || self == .xcodeOrphanIntermediate
   }
 
   package func assessment(for state: ReadState?) -> SafetyAssessment? {
@@ -49,6 +56,15 @@ package enum StorageProfile: String, Codable, Sendable {
         reason:
           "npm, erişilebilir paketleri gerektiğinde yeniden indirir. Çevrimdışı kurulum için bu önbellek gerekebilir."
       )
+    case .npxEntry:
+      return .init(level: .review,
+        reason: "Review this npx package before moving it to the Trash. Running commands keep their cached packages.")
+    case .xcodeCompilerCache, .clangModuleCache:
+      return .init(level: .safe,
+        reason: "The compiler regenerates this cache. The next build may take longer.")
+    case .expoDownloadCache:
+      return .init(level: .safe,
+        reason: "Expo downloads this cache again when needed. Offline use may require a new download.")
     case .goBuildCache:
       return .init(
         level: .safe,
@@ -58,6 +74,12 @@ package enum StorageProfile: String, Codable, Sendable {
       return .init(
         level: .safe,
         reason: "Xcode ara çıktıları yeniden üretir. Sonraki derleme daha uzun sürebilir.")
+    case .xcodeOrphanBuild:
+      return .init(level: .safe,
+        reason: "Only verified build intermediates for the missing Xcode workspace are included.")
+    case .xcodeOrphanIntermediate:
+      return .init(
+        level: .review, reason: "Bu derleme çıktılarının Xcode çalışma alanı artık bulunamıyor.")
     case .xcodeWorkspace:
       return .init(
         level: .review,
@@ -110,6 +132,9 @@ package enum StorageProfile: String, Codable, Sendable {
         reason:
           "Yüklü uygulamalar, ayarlar ve uygulama belgeleri burada saklanır. Cihazı sıfırlamak bu verileri kaybettirir."
       )
+    case .appCache:
+      return .init(level: .safe,
+        reason: "The app rebuilds these caches. Its next launch may take longer.")
     case .renderCache:
       return .init(
         level: .safe,

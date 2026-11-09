@@ -4,16 +4,14 @@ import Observation
 enum Workspace: String, Identifiable {
     case overview = "Genel bakış"
     case projects = "Projeler"
-    case activity = "Etkinlik"
     case settings = "Ayarlar"
-    static let destinations: [Self] = [.overview, .projects, .activity]
+    static let destinations: [Self] = [.overview, .projects]
     var id: Self { self }
     var symbol: String {
         switch self {
         case .settings: "gearshape"
         case .overview: "square.grid.2x2"
         case .projects: "folder"
-        case .activity: "clock.arrow.circlepath"
         }
     }
 }
@@ -42,7 +40,6 @@ func diskAmount(_ mb: Int) -> String {
 
 struct Receipt: Identifiable {
     let id = UUID()
-    let date = Date()
     let outputs: [Output]
     var restored = false
     var mb: Int { outputs.reduce(0) { $0 + $1.mb } }

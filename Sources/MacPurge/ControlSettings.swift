@@ -3,6 +3,10 @@ import ServiceManagement
 import SwiftUI
 
 struct ControlSettings: View {
+  private static let languages: KeyValuePairs<String, LocalizedStringKey> = [
+    "system": "Sistem", "tr": "Türkçe", "en": "English", "de": "Deutsch", "fr": "Français",
+    "es": "Español", "ja": "日本語", "zh-Hans": "简体中文", "ko": "한국어", "ru": "Русский",
+  ]
   let scan: LiveScan
   @Environment(AppPresence.self) private var presence
   @Environment(UpdateChecker.self) private var updater
@@ -10,6 +14,7 @@ struct ControlSettings: View {
   @State private var loginStatus = SMAppService.mainApp.status
   @State private var changingLogin = false
   @State private var loginError: String?
+  @State private var confirmsHistoryRemoval = false
   @AppStorage("scanProtectedLocations") private var protectedLocations = false
   @AppStorage("alertsEnabled") private var alerts = false
   @AppStorage("lowSpaceGB") private var low = 10
@@ -17,8 +22,27 @@ struct ControlSettings: View {
   @AppStorage("growthAlerts") private var growth = false
   @AppStorage("scheduledScan") private var daily = false
   @AppStorage("reviewLanguage") private var language = ReviewLanguage.defaultLanguage
+  @AppStorage("diskStatusStyle") private var diskStatusStyle = DiskStatusStyle.icon
   @State private var error: String?
+
   var body: some View {
+    WorkspacePage {
+      PageTitle(title: "Ayarlar")
+    } content: { _ in
+      settingsForm
+    }
+    .onChange(of: scenePhase, initial: true) { loginStatus = SMAppService.mainApp.status }
+    .environment(\.locale, ReviewLanguage.locale(language))
+    .onChange(of: language) { _, value in ReviewLanguage.apply(value) }
+    .alert("Geçmiş kapatılsın mı?", isPresented: $confirmsHistoryRemoval) {
+      Button("Vazgeç", role: .cancel) {}
+      Button("Geçmişi temizle", role: .destructive) { Task { await scan.setHistory(false) } }
+    } message: {
+      Text("MacPurge’ün yerel tarama kayıtları temizlenir.")
+    }
+  }
+
+  private var settingsForm: some View {
     Form {
       Section("General") {
         Toggle("Show in Dock", isOn: locationToggle(.dock))
@@ -27,6 +51,13 @@ struct ControlSettings: View {
         Toggle("Show in menu bar", isOn: locationToggle(.menuBar))
           .disabled(!presence.location.canHide(.menuBar))
           .help("Keep at least one icon visible in the Dock or menu bar.")
+        if presence.location.hasMenu {
+          settingsPicker("Menu bar display", choices: DiskStatusStyle.allCases, selection: $diskStatusStyle) {
+            Text(ReviewLanguage.text($0.title))
+          }
+          Text("Live capacity updates every 30 seconds without scanning files.")
+            .font(.caption).foregroundStyle(.secondary)
+        }
         Toggle("Girişte aç", isOn: Binding(
           get: { loginStatus == .enabled || loginStatus == .requiresApproval },
           set: { updateLogin($0) }
@@ -34,31 +65,24 @@ struct ControlSettings: View {
         .disabled(changingLogin)
         if loginStatus == .requiresApproval {
           Button("Approve in System Settings…") { SMAppService.openSystemSettingsLoginItems() }
+            .workspaceButton()
         }
         if let loginError { Text(loginError).font(.caption).foregroundStyle(.secondary) }
       }
       .toggleStyle(.switch)
       Section("Görünüm") {
-        Picker("Dil", selection: $language) {
-          Text("Sistem").tag("system")
-          Text("Türkçe").tag("tr")
-          Text("English").tag("en")
-          Text("Deutsch").tag("de")
-          Text("Français").tag("fr")
-          Text("Español").tag("es")
-          Text("日本語").tag("ja")
-          Text("简体中文").tag("zh-Hans")
-          Text("한국어").tag("ko")
-          Text("Русский").tag("ru")
+        settingsPicker("Dil", choices: Self.languages.map(\.key), selection: $language) { code in
+          Text(Self.languages.first { $0.key == code }?.value ?? LocalizedStringKey(code))
         }
       }
       Section("Tarama kapsamı") {
         Toggle("Ayrıntılı taramada korumalı konumları dahil et", isOn: $protectedLocations)
-        Text("Çöp, cihaz yedekleri ve uygulama kapsayıcıları için macOS erişim isteyebilir.").font(
+        Text("macOS may request access to Downloads, Trash, device backups and application containers.").font(
           .caption
         ).foregroundStyle(.secondary)
         Toggle("Uygulama açıkken günlük hızlı tarama", isOn: $daily)
         Button("Gizlenen \(scan.hiddenIDs.count) öğeyi göster", action: scan.restoreHidden)
+          .workspaceButton(.secondary)
           .disabled(scan.hiddenIDs.isEmpty)
       }
       Section("Scan exclusions") {
@@ -87,17 +111,25 @@ struct ControlSettings: View {
         Button(action: scan.chooseExcludedFolders) {
           Label("Add folders…", systemImage: "plus")
         }
+        .workspaceButton(.secondary)
         .disabled(scan.cleanup.busy)
       }
-      Section("Activity history") {
-        Picker("Keep history", selection: Binding(
-          get: { scan.historyRetention },
-          set: { value in Task { await scan.setHistoryRetention(value) } }
-        )) {
-          Text("30 days").tag(ActivityRetention.thirtyDays)
-          Text("90 days").tag(ActivityRetention.ninetyDays)
-          Text("Forever").tag(ActivityRetention.forever)
+      Section("Scan history") {
+        Toggle("Ölçüm geçmişini bu Mac’te tut", isOn: Binding(
+          get: { scan.historyEnabled },
+          set: { enabled in
+            if enabled { Task { await scan.setHistory(true) } } else { confirmsHistoryRemoval = true }
+          }))
+        settingsPicker("Keep history", choices: ActivityRetention.allCases, selection: Binding(
+          get: { scan.historyRetention }, set: { value in Task { await scan.setHistoryRetention(value) } }
+        )) { retention in
+          switch retention {
+          case .thirtyDays: Text("30 days")
+          case .ninetyDays: Text("90 days")
+          case .forever: Text("Forever")
+          }
         }
+        .disabled(!scan.historyEnabled)
         Text("Only scan records expire. Files in the Trash and their restore options are kept.")
           .font(.caption).foregroundStyle(.secondary)
         if let message = scan.historyError {
@@ -120,9 +152,7 @@ struct ControlSettings: View {
               }
             }))
         if alerts {
-          Picker("Boş alan eşiği", selection: $low) {
-            ForEach([5, 10, 20, 50, 100], id: \.self) { Text("\($0) GB").tag($0) }
-          }
+          settingsPicker("Boş alan eşiği", choices: [5, 10, 20, 50, 100], selection: $low) { Text("\($0) GB") }
           Toggle("Belirgin büyüme", isOn: $growth)
           Toggle("Haftalık büyüme özeti", isOn: $weekly)
         }
@@ -135,14 +165,19 @@ struct ControlSettings: View {
           get: { updater.automaticChecks }, set: { updater.automaticChecks = $0 }))
         HStack {
           Button("Check for Updates…") { Task { await updater.check(manual: true) } }
+            .workspaceButton(updater.available ? .secondary : .primary)
             .disabled(updater.checking || updater.installing)
-          if updater.checking || updater.installing { ProgressView().controlSize(.small) }
+          if updater.checking || updater.installing {
+            WorkspaceActivityIndicator(label: updater.installing ? "Updating…" : "Kontrol ediliyor…")
+          }
           if updater.available {
             Spacer()
             Button("Download and Restart") {
               scan.cancel()
               Task { await updater.downloadAndInstall() }
-            }.disabled(scan.cleanup.busy || updater.installing)
+            }
+            .workspaceButton()
+            .disabled(scan.cleanup.busy || updater.installing)
           }
         }
         if let status = updater.installationStatus {
@@ -158,9 +193,18 @@ struct ControlSettings: View {
         }
       }
     }.formStyle(.grouped)
-      .onChange(of: scenePhase, initial: true) { loginStatus = SMAppService.mainApp.status }
-      .environment(\.locale, ReviewLanguage.locale(language))
-      .onChange(of: language) { _, value in ReviewLanguage.apply(value) }
+      // Grouped forms already add their own padding at the scroll limits.
+      .contentMargins(.vertical, WorkspaceLayout.contentInset - 8, for: .scrollContent)
+  }
+
+  private func settingsPicker<Choice: Hashable>(_ label: LocalizedStringKey, choices: [Choice],
+    selection: Binding<Choice>, title: @escaping (Choice) -> Text
+  ) -> some View {
+    HStack {
+      Text(label).accessibilityHidden(true)
+      Spacer(minLength: 12)
+      WorkspacePicker(label: label, choices: choices, selection: selection, title: title)
+    }
   }
 
   private func locationToggle(_ target: AppPresence.Location) -> Binding<Bool> {
@@ -278,6 +322,8 @@ extension Date {
 }
 
 struct SettingsSidebarFooter: View {
+  private enum Destination: Hashable { case settings, about }
+
   @Environment(UpdateChecker.self) private var updater
   let scan: LiveScan
   let selected: Bool
@@ -292,15 +338,22 @@ struct SettingsSidebarFooter: View {
           .padding(.top, 4)
           .padding(.bottom, 6)
       }
-      List(selection: Binding<Bool?>(
-        get: { selected ? true : nil },
-        set: { if $0 == true { openSettings() } }
+      List(selection: Binding<Destination?>(
+        get: { selected ? .settings : nil },
+        set: { destination in
+          switch destination {
+          case .settings: openSettings()
+          case .about: NSApp.orderFrontStandardAboutPanel(nil)
+          case nil: break
+          }
+        }
       )) {
-        Label("Ayarlar", systemImage: "gearshape").tag(true)
+        SidebarLabel("Ayarlar", symbol: "gearshape", selected: selected).tag(Destination.settings)
+        SidebarLabel("About", symbol: "info.circle").tag(Destination.about)
       }
       .listStyle(.sidebar)
       .scrollDisabled(true)
-      .frame(height: 44)
+      .frame(height: 72)
     }
     .alert("Update failed", isPresented: Binding(
       get: { updateError != nil },
@@ -312,15 +365,7 @@ struct SettingsSidebarFooter: View {
     }
   }
 
-  @ViewBuilder private var updateButton: some View {
-    if #available(macOS 26, *) {
-      updateAction.buttonStyle(.glassProminent)
-    } else {
-      updateAction.buttonStyle(.borderedProminent)
-    }
-  }
-
-  private var updateAction: some View {
+  private var updateButton: some View {
     Button {
       guard !scan.cleanup.busy, !updater.installing, !updater.checking else { return }
       updateError = nil
@@ -332,7 +377,7 @@ struct SettingsSidebarFooter: View {
     } label: {
       HStack(spacing: 6) {
         if updater.installing {
-          ProgressView().controlSize(.small).accessibilityHidden(true)
+          WorkspaceActivityIndicator()
         } else {
           Image(systemName: "arrow.down.circle").accessibilityHidden(true)
         }
@@ -342,8 +387,7 @@ struct SettingsSidebarFooter: View {
       .font(.callout.weight(.semibold))
       .frame(maxWidth: .infinity)
     }
-    .tint(Ink.sea)
-    .controlSize(.large)
+    .workspaceButton()
     .disabled(scan.cleanup.busy || updater.installing || updater.checking)
     .help(scan.cleanup.busy
       ? ReviewLanguage.text("Önce devam eden işlemin bitmesini bekle.")

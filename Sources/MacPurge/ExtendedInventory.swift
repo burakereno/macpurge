@@ -150,7 +150,11 @@ enum ExtendedInventory {
       ProcessInfo.processInfo.environment["OLLAMA_MODELS"].map(URL.init(fileURLWithPath:))
       ?? home.appending(path: ".ollama/models")
     let models = try await ModelInventory.ollama(at: ollama, onDevice: volumes.device(for: ollama))
-    if models.isEmpty { add(.models, "Ollama model deposu", ollama.path) } else { rows += models }
+    if models.isEmpty {
+      var row = ScanRoot(group: .models, title: "Ollama model deposu", url: ollama, profile: .personal)
+      row.evidence = .init(owner: "Ollama", kind: .applicationData, finding: .unknownModelReferences, rule: "ollama.unverified")
+      rows.append(row)
+    } else { rows += models }
     add(.models, "LM Studio", ".lmstudio/models")
     add(.models, "PyTorch modelleri", ".cache/torch")
     for (name, path) in [
@@ -184,8 +188,6 @@ enum ExtendedInventory {
     for (name, path) in [
       ("Adobe Media Cache", "Library/Application Support/Adobe/Common/Media Cache Files"),
       ("Spotify", "Library/Application Support/Spotify/PersistentCache"),
-      ("Slack", "Library/Application Support/Slack/Cache"),
-      ("Discord", "Library/Application Support/discord/Cache"),
       ("Steam oyunları", "Library/Application Support/Steam/steamapps"),
       ("Apple Loops", "/Library/Audio/Apple Loops"),
       ("Logic ses kitaplığı", "/Library/Application Support/Logic"),
@@ -222,9 +224,12 @@ enum ExtendedInventory {
       ("visionOS aygıt desteği", "Library/Developer/Xcode/visionOS DeviceSupport"),
     ] { add(.xcode, name, path) }
     for (name, path) in [
+      ("pnpm önbelleği", "Library/Caches/pnpm"),
+      ("node-gyp başlıkları", "Library/Caches/node-gyp"),
+      ("TypeScript önbelleği", "Library/Caches/typescript"),
       ("pnpm yerel deposu", ".local/share/pnpm/store"), ("pnpm klasik depo", ".pnpm-store"),
       ("Gradle dağıtımları", ".gradle/wrapper/dists"), ("Go modülleri", "go/pkg/mod"),
-      ("npx", ".npm/_npx"), ("Conda paketleri", ".conda/pkgs"),
+      ("Conda paketleri", ".conda/pkgs"),
       ("CocoaPods paket dizini", ".cocoapods/repos"), ("Ivy", ".ivy2"),
     ] { add(.packages, name, path, .packageDownloads) }
     for (name, path) in [
@@ -237,10 +242,10 @@ enum ExtendedInventory {
       ("Node araç önbelleği", ".cache/node"), ("MongoDB imajları", ".cache/mongodb-binaries"),
       ("Antigravity eklentileri", ".antigravity-ide/extensions"), ("OrbStack", ".orbstack"),
     ] { add(.tools, name, path) }
-    for app in RenderCacheOwner.all {
+    for app in RenderCacheOwner.all where app.folder == "Code" || app.folder == "Cursor" {
       for cache in RenderCacheOwner.leaves {
         add(
-          .apps, app.folder + " · " + cache,
+          .tools, app.folder + " · " + cache,
           "Library/Application Support/" + app.folder + "/" + cache,
           .renderCache)
       }
@@ -253,12 +258,42 @@ enum ExtendedInventory {
     add(.logs, "iOS aygıt günlükleri", "Library/Developer/Xcode/iOS Device Logs", .logs)
     add(.system, "Sistem önbellekleri", "/Library/Caches", .systemManaged)
     if let cache = darwinUserDirectory(_CS_DARWIN_USER_CACHE_DIR) {
-      add(.temp, "Kullanıcının geçici önbelleği", cache, .systemManaged)
+      let url = URL(fileURLWithPath: cache)
+      var root = ScanRoot(group: .temp, title: "Kullanıcının geçici önbelleği",
+        url: url, profile: .systemManaged)
+      if let clang = clangModuleCache(home: home), clang.url.path.hasPrefix(url.path + "/") {
+        root.excludedDirectories.insert(String(clang.url.path.dropFirst(url.path.count + 1)))
+      }
+      rows.append(root)
     }
-    let known = ScanRoot.catalog(home: home, projects: selectedProjects) + rows
+    let editorData = try DeveloperDataInventory.discover(home: home, volumes: volumes)
+      + VersionInventory.discover(home: home, volumes: volumes)
+    rows = InventoryPartition.merging(rows, details: editorData)
+    let applications = try ApplicationInventory.discover(home: home, includeProtected: includeProtected, volumes: volumes)
+    rows = InventoryPartition.merging(rows, details: applications.roots)
+    rows = InventoryPartition.merging(rows, details: try DownloadsInventory.discover(
+      home: home, applications: applications.apps, volumes: volumes, includeProtected: includeProtected))
+    let base = ScanRoot.catalog(home: home, projects: selectedProjects)
+    let reserved = rows.filter {
+      $0.group != .apps && !($0.group == .models && $0.evidence?.kind == .cache
+        && AppCacheRule.at($0.url, home: home) != nil)
+    }
+    let appCaches = try AppCacheRule.discover(home: home, includeProtected: includeProtected,
+      volumes: volumes, claimed: base + reserved, apps: applications.apps)
+    var cacheMeasurements: [ScanRoot] = []
+    if includeProtected {
+      cacheMeasurements = try ProtectedCacheInventory.coreDevice(home: home, volumes: volumes)
+        + ProtectedCacheInventory.telegram(home: home, volumes: volumes, apps: applications.apps)
+      // The selected project already measures its contents.
+      cacheMeasurements.removeAll { row in
+        selectedProjects.contains { row.url.path == $0.path || row.url.path.hasPrefix($0.path + "/") }
+      }
+    }
+    rows = InventoryPartition.merging(rows, details: appCaches + cacheMeasurements)
+    let known = base + rows
     rows += try CategoryLocations.discover(
       home: home, known: known, includeProtected: includeProtected, volumes: volumes)
-    return rows
+    return InventoryPartition.merging(rows, details: []).map { applications.attributing($0, home: home) }
   }
 
   @concurrent static func projectFolders(
@@ -275,6 +310,14 @@ enum ExtendedInventory {
         return child
       }
     }
+  }
+
+  static func clangModuleCache(home: URL) -> ScanRoot? {
+    guard home.standardizedFileURL.path == FileManager.default.homeDirectoryForCurrentUser.path,
+      let cache = darwinUserDirectory(_CS_DARWIN_USER_CACHE_DIR)
+    else { return nil }
+    return .init(group: .tools, title: "Clang modül önbelleği",
+      url: URL(fileURLWithPath: cache).appending(path: "clang/ModuleCache"), profile: .clangModuleCache)
   }
 
   private static func darwinUserDirectory(_ key: Int32) -> String? {

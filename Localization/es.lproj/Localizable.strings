@@ -2,7 +2,6 @@
 "Depolama" = "Almacenamiento";
 "Proje klasörleri" = "Carpetas de proyectos";
 "Alan planı" = "Plan de espacio";
-"Etkinlik" = "Actividad";
 "Çalışma alanı" = "Espacio de trabajo";
 "Salt okunur tarama" = "Análisis de solo lectura";
 "Güvenli" = "Seguro";
@@ -50,6 +49,7 @@
 "Dil" = "Idioma";
 "Ayarlar" = "Ajustes";
 "Tarama kapsamı" = "Ámbito del análisis";
+"Scan Disk" = "Escanear disco";
 "Hızlı tarama" = "Análisis rápido";
 "Ayrıntılı tarama" = "Análisis detallado";
 "Yeniden tara" = "Volver a analizar";
@@ -273,7 +273,7 @@
 "These folders and everything inside them are skipped in quick and extended scans." = "Estas carpetas y todo su contenido se omiten en los análisis rápidos y ampliados.";
 "Remove exclusion" = "Eliminar exclusión";
 "Add folders…" = "Añadir carpetas…";
-"Activity history" = "Historial de actividad";
+"Scan history" = "Historial de análisis";
 "Keep history" = "Conservar historial";
 "30 days" = "30 días";
 "90 days" = "90 días";
@@ -299,3 +299,22 @@
 "Updating…" = "Actualizando…";
 "Update failed" = "Error al actualizar";
 "OK" = "Aceptar";
+
+/* Storage groups and developer cache status */
+"Yapay zekâ" = "IA";
+"Sanal makineler ve konteynerler" = "Máquinas virtuales y contenedores";
+"Dosyalar" = "Archivos";
+"Sistem ve yedekler" = "Sistema y copias de seguridad";
+"Araç verileri ve önbellekleri" = "Datos y cachés de herramientas";
+"Seçili projeler" = "Proyectos seleccionados";
+"Apple simülatörleri" = "Simuladores de Apple";
+"Uygulamalar" = "Aplicaciones";
+"Medya kitaplıkları" = "Bibliotecas multimedia";
+"Yerel modeller" = "Modelos locales";
+"Yapay zekâ aracı verileri" = "Datos de herramientas de IA";
+"Alt grup" = "Subgrupo";
+"Ölçülen alan" = "Espacio medido";
+"Şu anda taşınabilir: %lld öğe · %@" = "Se pueden mover ahora: %lld elementos · %@";
+"Clang modül önbelleği" = "Caché de módulos de Clang";
+"Bu derleme çıktılarının Xcode çalışma alanı artık bulunamıyor." = "No se encontró el espacio de trabajo de Xcode de estos archivos de compilación.";
+"Çalışma alanı bulunamadı. Yalnızca Xcode’un derleme ara çıktıları Çöp’e taşınır." = "No se encontró el espacio de trabajo. Solo se moverán a la papelera los archivos intermedios de compilación de Xcode.";

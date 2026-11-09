@@ -4,7 +4,9 @@ import SwiftUI
   import MacPurgeCore
 #endif
 
-enum LiveSection: Hashable { case overview, storage, projects, plan, activity, settings }
+enum LiveSection: Hashable {
+  case overview, storage, uninstall, duplicates, projects, plan, settings, trash
+}
 
 struct LiveWorkspace: View {
   @Environment(\.scenePhase) private var scenePhase
@@ -12,102 +14,48 @@ struct LiveWorkspace: View {
   @Binding var section: LiveSection
   @State private var selectedIDs: Set<String> = []
   @State private var showsMoveResult = false
-  @State private var storageRoute = StorageRoute()
 
   var body: some View {
     @Bindable var cleanup = scan.cleanup
     NavigationSplitView {
-      VStack(alignment: .leading, spacing: 0) {
-        HStack(spacing: 9) {
-          LayerMark().frame(width: 32, height: 32)
-          Text("MacPurge").font(.system(size: 19, weight: .bold)).tracking(-0.7)
-        }.padding(.leading, 18).padding(.top, 13).padding(.bottom, 19)
-        List(
-          selection: Binding<LiveSection?>(
-            get: { section }, set: { if let value = $0 { section = value } })
-        ) {
-          Section("Çalışma alanı") {
-            Label("Genel bakış", systemImage: "square.grid.2x2").tag(LiveSection.overview)
-            Label("Depolama", systemImage: "externaldrive").tag(LiveSection.storage)
-            Label("Proje klasörleri", systemImage: "folder").tag(LiveSection.projects)
-            Label("Alan planı", systemImage: "scope").tag(LiveSection.plan)
-            Label("Etkinlik", systemImage: "clock.arrow.circlepath").tag(LiveSection.activity)
-          }
-        }.listStyle(.sidebar)
-        SettingsSidebarFooter(scan: scan, selected: section == .settings) { section = .settings }
-      }
-      .navigationSplitViewColumnWidth(min: 165, ideal: 194, max: 230)
+      sidebar
+        .navigationSplitViewColumnWidth(min: 165, ideal: 194, max: 230)
+        .toolbar(removing: .sidebarToggle)
     } detail: {
       Group {
         switch section {
         case .settings: ControlSettings(scan: scan)
         case .overview:
           LiveOverview(scan: scan, selected: $selectedIDs) {
-            storageRoute = StorageRoute()
             section = .storage
           }
-        case .storage:
-          StorageBrowser(scan: scan, selected: $selectedIDs, route: $storageRoute) {
-            section = .plan
-          }
+        case .storage, .trash:
+          StorageBrowser(scan: scan, selected: $selectedIDs, showsTrash: section == .trash,
+            openCategories: { section = .storage }, openPlan: { section = .plan })
+            .id(section)
+        case .uninstall: ApplicationUninstallView(scan: scan)
+        case .duplicates: DuplicatesView(scan: scan)
         case .projects:
           ProjectRootsView(scan: scan)
         case .plan: SpacePreview(scan: scan, selected: $selectedIDs)
-        case .activity: ScanActivity(scan: scan, selected: $selectedIDs)
         }
       }
-      .navigationTitle(section == .settings ? Text("Ayarlar") : Text("MacPurge"))
-      .toolbar {
-        if section != .settings {
-          ToolbarItemGroup(placement: .primaryAction) {
-            Button(action: scan.chooseProjects) {
-              Label("Proje klasörü seç", systemImage: "folder.badge.plus")
-            }
-            .help("Ölçülecek proje klasörlerini seç")
-            if scan.phase == .running {
-              Button(action: scan.cancel) { Label("Taramayı durdur", systemImage: "stop.circle") }
-                .help("Taramayı durdur")
-            } else {
-              Button(action: scan.start) { Label("Yeniden tara", systemImage: "arrow.clockwise") }
-                .help("Tüm konumları yeniden ölç")
-            }
-          }
-          ToolbarItem(placement: .primaryAction) {
-            ControlGroup {
-              Button(action: scan.startQuick) {
-                Label("Hızlı tarama", systemImage: "bolt")
-              }
-              .help("Hızlı tarama")
-              Button(action: scan.startDetailed) {
-                Label("Ayrıntılı tarama", systemImage: "bolt.badge.clock")
-              }
-              .help("Ayrıntılı tarama")
-            }
-            .controlGroupStyle(.navigation)
-            .labelStyle(.titleAndIcon)
-            .disabled(scan.cleanup.busy)
-          }
-          ToolbarItem(placement: .primaryAction) {
-            Button(action: scan.exportReport) {
-              Label("JSON dışa aktar…", systemImage: "square.and.arrow.up")
-            }
-            .help("JSON dışa aktar…")
-            .disabled(scan.report == nil)
-          }
-        }
-      }
+      .modifier(WorkspaceDetailSurface())
+      .environment(\.workspaceHeaderControls, .scan(scan))
+      .ignoresSafeArea(.container, edges: .top)
     }
     .sheet(item: $cleanup.preview) { plan in TrashPreviewSheet(plan: plan, scan: scan) }
     .sheet(item: $cleanup.permanentReview) { review in PermanentCleanupSheet(review: review, scan: scan) }
-    .safeAreaInset(edge: .bottom) {
-      if section != .plan && cleanup.permanentReview == nil && (cleanup.busy || showsMoveResult) {
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      if section != .plan && cleanup.permanentReview == nil && (cleanup.busy || (section != .uninstall && showsMoveResult)) {
         HStack {
           if cleanup.busy {
-            ProgressView().controlSize(.small)
+            WorkspaceActivityIndicator()
             Text(
               ReviewLanguage.text(
                 cleanup.applying ? "Çöp’e taşınıyor…" : "Seçilen klasörler doğrulanıyor…"))
             Button("Durdur") { cleanup.cancel() }
+              .workspaceButton(.secondary)
           } else if let result = cleanup.outcome {
             Text(
               ReviewLanguage.format("Çöp’e taşınan: %lld öğe · %@", Int64(result.moved.count),
@@ -119,6 +67,7 @@ struct LiveWorkspace: View {
               section = .plan
               showsMoveResult = false
             }
+            .workspaceButton(.secondary)
             Button {
               showsMoveResult = false
             } label: {
@@ -141,9 +90,6 @@ struct LiveWorkspace: View {
       }
     }
     .tint(Ink.sea)
-    .onChange(of: section) {
-      if section != .storage { storageRoute = StorageRoute() }
-    }
     .task { if scan.phase == .idle { scan.start() } }
     .task(id: eligibilityRequest) {
       guard eligibilityRequest != nil else { return }
@@ -163,6 +109,65 @@ struct LiveWorkspace: View {
       }
     }
   }
+
+  private var sidebar: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 9) {
+        LayerMark().frame(width: 32, height: 32)
+        Text("MacPurge").font(.system(size: 19, weight: .bold)).tracking(-0.7)
+      }
+      .padding(.leading, 18).padding(.top, 13).padding(.bottom, 19)
+
+      List(selection: Binding<LiveSection?>(
+        get: { section }, set: { if let value = $0 { section = value } })) {
+        sidebarRow("Genel bakış", symbol: "square.grid.2x2", destination: .overview)
+        Section("Clean") {
+          sidebarRow("Proje klasörleri", symbol: "folder", destination: .projects)
+          sidebarRow("Alan planı", symbol: "scope", destination: .plan)
+        }
+        Section("Review") {
+          sidebarRow("Depolama", symbol: "externaldrive", destination: .storage)
+          sidebarRow("Uninstall Apps", symbol: "app.dashed", destination: .uninstall)
+          sidebarRow("Duplicates", symbol: "doc.on.doc", destination: .duplicates)
+        }
+      }
+      .listStyle(.sidebar)
+
+      SettingsSidebarFooter(scan: scan, selected: section == .settings) { section = .settings }
+      trashButton
+        .padding(.horizontal, 10).padding(.top, 3).padding(.bottom, 10)
+    }
+    .scrollContentBackground(.hidden)
+    .background(Color(nsColor: .windowBackgroundColor))
+  }
+
+  private func sidebarRow(_ title: LocalizedStringKey, symbol: String, destination: LiveSection) -> some View {
+    SidebarLabel(title, symbol: symbol, selected: section == destination)
+      .tag(destination)
+  }
+
+  private var trashButton: some View {
+    let reading = CategorySize.read(.trash, in: scan.storageReport, pending: scan.pendingCategories)
+    let selected = section == .trash
+    return Button {
+      section = .trash
+    } label: {
+      HStack {
+        Label("Trash contents", systemImage: "trash").lineLimit(1)
+        Spacer()
+        if reading.bytes != nil {
+          Text(reading.label).monospacedDigit().fontWeight(.semibold).fixedSize()
+        }
+      }
+      .font(.callout)
+      .padding(.horizontal, 11).padding(.vertical, 8)
+      .background(.primary.opacity(selected ? 0.12 : 0.055), in: .rect(cornerRadius: 9))
+      .contentShape(.rect(cornerRadius: 9))
+    }
+    .buttonStyle(.plain)
+    .accessibilityAddTraits(selected ? .isSelected : [])
+  }
+
   private var inUseIDs: Set<String> {
     guard eligibilityRequest != nil else { return [] }
     return Set(scan.actions.compactMap { id, action in
@@ -203,15 +208,22 @@ private struct LiveOverview: View {
       lhs.bytes == rhs.bytes ? lhs.group.rawValue < rhs.group.rawValue : lhs.bytes > rhs.bytes
     }
     let rootsByID = groups.isEmpty ? [:] : Dictionary(scan.roots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-    Page {
-      HStack {
-        PageTitle(kicker: "Çalışma alanı", title: "Genel bakış",
-          subtitle: "Items you can clean up and how much space they use.")
-        Spacer(minLength: 4)
+    Page(overviewLayout: true) {
+      PageTitle(title: "Genel bakış") {
         SafeTrashButton(scan: scan, items: rows.filter { scan.action(for: $0).risk == .safe })
       }
+    } content: {
       if let disk = scan.volume {
-        DiskView(reading: disk, safeBytes: safeCleanupBytes(rows))
+        let safeBytes = safeCleanupBytes(rows)
+        let sizes = DiskBreakdown.sizes(in: scan.storageReport,
+          pending: scan.pendingCategories, volumeDevice: scan.volumeDevice)
+        let safeGroups = Dictionary(grouping: scan.safeMoves(rows), by: \.category)
+        let safeByGroup = Dictionary(uniqueKeysWithValues: ScanGroup.allCases.map {
+          ($0, scan.cleanupBytes(safeGroups[$0.rawValue] ?? []))
+        })
+        DiskBreakdownView(disk: disk,
+          breakdown: DiskBreakdown(reading: disk, sizes: sizes,
+            safeBytes: safeBytes, safeByGroup: safeByGroup), updating: scan.phase == .running)
       } else if scan.phase == .finished {
         Note(symbol: "internaldrive", text: "Disk kapasitesi okunamadı.")
       }
@@ -237,17 +249,19 @@ private struct LiveOverview: View {
             Text(scan.selectionLabel(scan.distinctMoves(choices))).font(.callout.monospacedDigit())
             Button("Seçilenleri Çöp’e taşı…") {
               scan.cleanup.prepare(choices, scan: scan, explicit: true)
-            }.controlSize(.small).disabled(scan.cleanup.busy)
+            }
+            .workspaceButton().disabled(scan.cleanup.busy)
           }
         }
         if !groups.isEmpty {
           InventoryList(groups) { section in
             ScanGroupView(section: section, scan: scan, rootsByID: rootsByID, selected: $selected)
           }
+        } else if scan.phase.awaitsMeasurements || (scan.phase == .finished
+          && scan.actions.isEmpty && scan.report?.items.isEmpty == false) {
+          WorkspaceSkeleton(layout: .inventory, message: "Kontrol ediliyor…", rows: 4)
         } else if scan.phase == .finished {
-          let checking = scan.actions.isEmpty && scan.report?.items.isEmpty == false
-          Note(symbol: checking ? "clock" : "checkmark.circle",
-            text: checking ? "Kontrol ediliyor…" : "Şu anda Çöp’e taşınabilecek bir öğe yok.")
+          Note(symbol: "checkmark.circle", text: "Şu anda Çöp’e taşınabilecek bir öğe yok.")
         }
         Button("Tüm ölçümleri Depolama’da gör", action: openStorage).buttonStyle(.link)
         if let note = scan.selectionNote { Note(symbol: "folder", text: note) }
@@ -260,6 +274,35 @@ private struct LiveOverview: View {
       report.items.allSatisfy({ scan.hiddenIDs.contains($0.id) || scan.actions[$0.id] != nil })
     else { return nil }
     return scan.cleanupBytes(scan.safeMoves(rows))
+  }
+}
+
+struct WorkspaceScanControls: View {
+  let scan: LiveScan
+
+  var body: some View {
+    HStack(spacing: 8) {
+      if scan.phase == .running {
+        scanButton("Taramayı durdur", icon: "stop.circle", labelStyle: .titleAndIcon,
+          borderShape: .capsule, action: scan.cancel)
+      } else {
+        scanButton("Hızlı tarama", icon: "bolt", labelStyle: .iconOnly, action: scan.startQuick)
+          .disabled(scan.cleanup.busy)
+        scanButton("Ayrıntılı tarama", icon: "bolt.badge.clock", labelStyle: .iconOnly, action: scan.startDetailed)
+          .disabled(scan.cleanup.busy)
+      }
+    }
+    .fixedSize(horizontal: true, vertical: false)
+  }
+
+  private func scanButton(_ title: LocalizedStringKey, icon: String, labelStyle: some LabelStyle,
+    borderShape: ButtonBorderShape = .circle, action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Label(title, systemImage: icon).labelStyle(labelStyle)
+    }
+    .workspaceButton(.secondary, controlSize: WorkspaceControlLayout.toolbarSize, borderShape: borderShape)
+    .help(Text(title))
   }
 }
 
@@ -337,10 +380,12 @@ extension ScanGroup {
     case .backups: "iphone.and.arrow.forward"
     case .shared: "person.2"
     case .android: "apps.iphone"
+    case .appCaches: "internaldrive"
     case .apps: "app"
     case .system: "gearshape"
     case .other: "folder.badge.questionmark"
     case .snapshots: "clock.arrow.circlepath"
+    case .downloads: "arrow.down.circle"
     }
   }
   var tint: Color {
@@ -359,7 +404,8 @@ extension ScanGroup {
     case .logs: "Kullanıcı günlükleri ve tanılama raporları"
     case .models: "Model ağırlıkları, yerel imajlar ve yapay zekâ araçları"
     case .android: "SDK, emülatörler ve Android Studio"
-    case .apps: "Uygulama desteği, önbellekler ve medya kitaplıkları"
+    case .appCaches: "Verified caches that apps can rebuild."
+    case .apps: "Uygulama desteği ve medya kitaplıkları"
     case .tools: "Editörler, eklentiler ve geliştirme ortamları"
     case .runtimes: "Cihazlardan ayrı, yüklü simülatör imajları"
     case .other: "Araç konumlarında ve seçtiğin klasörlerde 500 MiB ve üzeri alt klasörler"

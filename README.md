@@ -39,16 +39,24 @@
 ## Features
 
 - **Disk overview** — see total capacity, free space, other usage and the estimated space available from supported Safe cleanup actions.
-- **Storage browser** — explore category totals and Safe/Review breakdowns, then open a native item table with search, sorting and file details.
+- **Storage browser** — explore category totals and Safe/Review breakdowns, then open item cards with search, sorting and file details. App Caches has its own category.
+- **Explainable inventory** — inspect what data is, which tool created it, the evidence behind a review suggestion, and the effect of removal. Explanations use saved scan evidence and preserve uncertainty about missing projects and last use.
+- **Editor and AI tool data** — extended scans distinguish supported editor workspaces and extension registry leftovers, plus Claude/Codex logs, caches, settings, checkpoints and conversation history. New personal-data findings are inspection-only.
+- **Uninstall Apps** — compare installed app bundles and recognized data using the latest extended scan. Open an app to choose files and move them to the Trash. Allocated totals deduplicate hard links and mark partial measurements.
+- **Duplicates** — open Duplicates in the sidebar and choose a folder. Bounded content comparisons find matching files of at least 1 MB, skipping application data and dependencies. Reviewed Trash actions retain a verified copy and recheck its contents. Shared or unknown clone allocation is excluded from estimated recovery.
+- **Docker objects** — open Docker Manager from the Docker category in Storage to inspect containers, images, volumes and build cache. Separate permanent-operation previews support stopped containers, unused images and individual unused, unshared cache records. Volumes and forced removals are excluded. Operation receipts are recorded locally.
+- **Tool versions** — extended scans show metadata-backed defaults and older numeric versions for nvm, pyenv, rbenv and Homebrew, plus Rust's default toolchain. These findings are inspection-only and include the relevant manager's review command.
+- **Download suggestions** — with protected-location scanning enabled, inspect recognized installers, uncertain installed-app matches and content-verified repeat downloads. These suggestions are inspection-only.
+- **Ollama leftovers** — distinguish unreferenced model blobs and partial downloads. Reviewed Trash actions require complete, readable manifests, a stable file at least 72 hours old and an idle Ollama process; references are checked again before execution.
 - **Project folders** — choose project roots, discover supported build outputs and dependency folders, and review the cost of rebuilding or downloading them again.
 - **Space planning** — set a cleanup target, inspect the proposed candidates and see when the available actions cannot reach it.
 - **Quick and extended scans** — scan known locations, follow progress, cancel a scan and inspect partial or unavailable measurements.
-- **Cleanup previews and restore** — review supported file removals before moving them to the Trash, then find their restore options in Activity.
-- **Activity and growth tracking** — browse previous scans, storage changes and cleanup results.
+- **Cleanup previews and restore** — review supported file removals before moving them to the Trash, then find their restore options in Space plan.
 - **Scan exclusions** — choose folders to skip, including everything inside them, in both quick and extended scans.
 - **History retention** — keep scan records for 30 days, 90 days or forever; restore records are retained separately.
 - **Dock and menu bar access** — use either or both, keep the app available after closing its window, and optionally launch it at login.
 - **Menu bar shortcuts** — left-click the icon to open MacPurge; right-click or Control-click to open its menu.
+- **Live menu bar capacity** — optionally display free space, a usage ring or both in Settings. Volume capacity refreshes every 30 seconds while the menu extra is visible, without scanning files. Icon-only remains the default.
 - **Optional notifications** — configure low-space thresholds, significant growth alerts and weekly summaries.
 - **Widgets and Shortcuts** — view the last completed disk summary and use read-only intents for saved measurements and space-plan previews.
 - **JSON export and CLI** — export scan reports or generate a read-only cleanup plan from the app's command-line entry point.
@@ -73,7 +81,9 @@ Inventory coverage does not mean every item can be deleted. Availability, permis
 
 MacPurge distinguishes measured folder sizes, estimated reclaimable space and the disk's current free space. Rebuildable caches and verified outputs are assessed separately from personal data and system-managed content.
 
-Supported file removals use a preview and move files to the Trash, with restore records. Tool-specific permanent operations have their own explicit confirmation. Moving files to the Trash does not immediately increase free space; the files continue to occupy the disk until the Trash is emptied.
+Supported file removals move files to the Trash with restore records. In Uninstall Apps, the Remove button applies the selection shown on screen. Other cleanup flows show a preview before moving files. Tool-specific permanent operations have their own explicit confirmation. Files in the Trash continue to occupy disk space until the Trash is emptied.
+
+Duplicate searches compare at most 250,000 candidate files within a 64 GB hashing budget. Results describe the verified scope; a size or version difference alone is never proof that a file is no longer needed. Duplicate Trash actions are limited to eligible personal folders inside the user's home directory. Docker removals cannot be restored by MacPurge, and Docker-reported recovery is separate from macOS free space. Docker operation records are stored in `DockerActions.jsonl` in the app's local support directory.
 
 Scan history and restore journals are stored locally on your Mac. Update checks and downloads contact GitHub.
 
@@ -87,9 +97,9 @@ Scan history and restore journals are stored locally on your Mac. Update checks 
 
 Double-click MacPurge to launch it. The release app and DMG are Developer ID signed, notarized by Apple and stapled. The same download supports Intel and Apple Silicon Macs running macOS 14.0 or later.
 
-Start with a quick scan, or add project folders using the folder button in the toolbar. Use an extended scan for broader coverage. Configure excluded folders, history retention, Dock/menu bar visibility and updates in **Settings**.
+Start with a quick scan, or add folders in **Project folders**. Use an extended scan for broader coverage. Configure excluded folders, history retention, Dock/menu bar visibility and updates in **Settings**.
 
-macOS may request access to protected locations when you choose to include them in an extended scan. Inaccessible locations are reported in the scan results.
+macOS may request access to Downloads, Trash, device backups and application containers when you choose to include protected locations in an extended scan. Inaccessible locations are reported in the scan results.
 
 ## Build from Source
 

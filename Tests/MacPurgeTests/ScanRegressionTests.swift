@@ -73,7 +73,7 @@ struct ScanRegressionTests {
     #expect(volumes.restrict(discovered).expectedDevice == 777)
   }
 
-  @Test func unrelatedXcodeWorkspaceIsExcludedBeforeMarkerValidation() throws {
+  @Test func xcodeWorkspaceDiscoveryRespectsHomeAndExplicitProjects() throws {
     let f = try Fixture()
     defer { f.finish() }
     let derived = try f.folder("Derived")
@@ -82,9 +82,9 @@ struct ScanRegressionTests {
     try Data().write(to: elsewhere.appending(path: "project.pbxproj"))
     try PropertyListEncoder().encode(["WorkspacePath": elsewhere.path]).write(
       to: derived.appending(path: "info.plist"))
-    #expect(ProjectAttribution.workspace(of: derived, selected: [selected]) == nil)
-    #expect(ProjectAttribution.workspace(of: derived, expected: selected.path) == nil)
-    #expect(ProjectAttribution.workspace(of: derived, selected: [f.home]) == elsewhere.path)
+    #expect(ProjectAttribution.outputWorkspace(in: derived, home: selected, projects: []) == nil)
+    #expect(ProjectAttribution.outputWorkspace(in: derived, home: selected, projects: [f.home])?.path == elsewhere.path)
+    #expect(ProjectAttribution.outputWorkspace(in: derived, home: f.home, projects: [])?.profile == .xcodeIntermediate)
   }
 
   @Test func malformedRowsDoNotHideValidHistoryOrWeeklySamples() throws {

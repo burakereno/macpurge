@@ -17,9 +17,11 @@ package enum ScanGroup: String, CaseIterable, Sendable {
   case backups = "Cihaz yedekleri"
   case shared = "Paylaşılan veriler"
   case android = "Android"
+  case appCaches = "Uygulama önbellekleri"
   case apps = "Uygulamalar ve medya"
   case system = "Sistem"
   case other = "Diğer büyük klasörler"
+  case downloads = "İndirilenler"
   case snapshots = "Time Machine"
 }
 
@@ -41,6 +43,8 @@ package struct ScanRoot: Identifiable, Hashable, Sendable {
   package var projectOwner: String? = nil
   package var expectedDevice: dev_t? = nil
   package var downloadCache: PackageDownloadCache? = nil
+  package var evidence: InventoryEvidence? = nil
+  package var application: ApplicationIdentity? = nil
 
   package func effectiveProfile(_ size: RootSize?) -> StorageProfile {
     size?.unexpectedDownloads == true ? .unrecognizedDownloads : profile
@@ -85,9 +89,16 @@ package struct ScanRoot: Identifiable, Hashable, Sendable {
     self.source = source
   }
 
+  package static let npxCachePath = ".npm/_npx"
+  package static let expoCacheLeaves = [
+    "android-apk-cache", "ios-simulator-app-cache", "native-modules-cache",
+    "schema-cache", "versions-cache", "expo-go",
+  ]
+
   package static func catalog(home: URL, projects: [URL]) -> [Self] {
     let caches: [(String, String, StorageProfile)] = [
       ("npm", ".npm/_cacache", .npmCache),
+      ("npx", npxCachePath, .systemManaged),
       ("SwiftPM", "Library/Caches/org.swift.swiftpm", .sharedDependencies),
       ("Homebrew · diğer içerik", "Library/Caches/Homebrew", .packageDownloads),
       ("Yarn", "Library/Caches/Yarn", .packageDownloads),
@@ -125,6 +136,10 @@ package struct ScanRoot: Identifiable, Hashable, Sendable {
           profile: .verifiedDownloads)
         root.downloadCache = cache
         return root
+      }
+      + expoCacheLeaves.map { leaf in
+        Self(group: .tools, title: "Expo · " + leaf,
+          url: home.appending(path: ".expo/" + leaf), profile: .expoDownloadCache)
       }
       + projects.map {
         Self(group: .projects, title: $0.lastPathComponent, url: $0, profile: .project)
