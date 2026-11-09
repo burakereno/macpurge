@@ -117,19 +117,31 @@ struct InventoryExplanation {
 
 struct InventoryExplanationView: View {
   let item: ReportItem
+
   var body: some View {
+    InventoryRows(rows, id: \.title) { row in
+      InventoryReadout(title: ReviewLanguage.text(row.title), amount: "", symbol: row.symbol,
+                       subtitle: ReviewLanguage.text(row.detail))
+    }
+  }
+
+  private var rows: [(title: String, detail: String, symbol: String)] {
     let explanation = InventoryExplanation(item: item)
-    let rows = [
+    var rows: [(String, String, String)] = [
       ("What is this data?", explanation.purpose, "doc.text"),
       ("Created by", explanation.origin, "app"),
       ("Why review it?", explanation.finding, "magnifyingglass"),
       ("Effect of removal", explanation.impact, "exclamationmark.circle"),
-    ] + (explanation.uncertainty.map { [("Uncertainty", $0, "questionmark.circle")] } ?? [])
-      + (item.evidence?.note.flatMap { $0.isEmpty ? nil : [("Evidence", $0, "doc.text.magnifyingglass")] } ?? [])
-      + (item.evidence?.management.map { [("Manage with the owning tool", $0, "terminal")] } ?? [])
-    InventoryRows(rows, id: \.0) { title, detail, symbol in
-      InventoryReadout(title: ReviewLanguage.text(title), amount: "", symbol: symbol,
-                       subtitle: ReviewLanguage.text(detail))
+    ]
+    if let uncertainty = explanation.uncertainty {
+      rows.append(("Uncertainty", uncertainty, "questionmark.circle"))
     }
+    if let note = item.evidence?.note, !note.isEmpty {
+      rows.append(("Evidence", note, "doc.text.magnifyingglass"))
+    }
+    if let management = item.evidence?.management {
+      rows.append(("Manage with the owning tool", management, "terminal"))
+    }
+    return rows
   }
 }
